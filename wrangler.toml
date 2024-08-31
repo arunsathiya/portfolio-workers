@@ -4,9 +4,8 @@ main = "src/index.ts"
 compatibility_date = "2024-08-21"
 compatibility_flags = ["nodejs_compat"]
 routes = [
-    {
-        pattern = "arun.blog", custom_domain = true
-    }
+    { pattern = "www.arun.blog", custom_domain = true }
+    { pattern = "arun.blog", custom_domain = true }
 ]
 
 # Automatically place your workloads in an optimal location to minimize latency.
