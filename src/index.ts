@@ -62,7 +62,7 @@ export default {
 				await env.BlogAssets.put(key, JSON.stringify({
 					url: signedUrl,
 					refreshTime: Date.now() + 55 * 60 * 1000,
-				}), { expirationTtl: 3600 });
+				}));
 			} else {
 				console.log(`Used cached signed URL for ${key}`);
 				signedUrl = cache.url;
