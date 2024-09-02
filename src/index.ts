@@ -163,9 +163,11 @@ export default {
 		const url = new URL(request.url);
 		const s3Client = createS3Client(env);
 
+		if (url.pathname.startsWith('/cdn/')) {
+			handleCDNRequest(request, env, s3Client)
+		}
+
 		switch (url.pathname) {
-			case '/cdn/':
-				return handleCDNRequest(request, env, s3Client);
 			case '/api/generate-image':
 				if (request.method !== 'POST') {
 					return new Response('Method not allowed', { status: 405 });
