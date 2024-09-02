@@ -130,7 +130,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 
 	const output = await replicate.predictions.create({
 		model: "black-forest-labs/flux-schnell",
-		input: { prompt, num_outputs: 2, aspect_ratio: "16:9" },
+		input: { prompt, num_outputs: 4, aspect_ratio: "16:9" },
 		webhook: callbackUrl,
 		webhook_events_filter: ["completed"]
 	});
