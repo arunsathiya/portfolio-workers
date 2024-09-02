@@ -164,7 +164,7 @@ export default {
 		const s3Client = createS3Client(env);
 
 		if (url.pathname.startsWith('/cdn/')) {
-			handleCDNRequest(request, env, s3Client)
+			return handleCDNRequest(request, env, s3Client)
 		}
 
 		switch (url.pathname) {
