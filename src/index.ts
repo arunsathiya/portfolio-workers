@@ -64,6 +64,7 @@ export default {
 					refreshTime: Date.now() + 55 * 60 * 1000,
 				}), { expirationTtl: 3600 });
 			} else {
+				console.log(`Used cached signed URL for ${key}`);
 				signedUrl = cache.url;
 			}
 			const response = await fetch(signedUrl);
