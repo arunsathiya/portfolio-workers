@@ -117,7 +117,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 		return new Response('Missing authorization header', { status: 401 });
 	}
 
-	const title = url.searchParams.get('shortBlogPostTitleForPromptGeneration');
+	const title = url.searchParams.get('generateImageTitle');
 	const blogPostDate = url.searchParams.get('blogPostDate');
 	const blogPostSlug = url.searchParams.get('blogPostSlug');
 	if (!title || !blogPostDate || !blogPostSlug) {
