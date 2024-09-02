@@ -118,15 +118,15 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 	}
 
 	const title = url.searchParams.get('generateImageTitle');
-	const blogPostDate = url.searchParams.get('blogPostDate');
-	const blogPostSlug = url.searchParams.get('blogPostSlug');
-	if (!title || !blogPostDate || !blogPostSlug) {
+	const date = url.searchParams.get('date');
+	const slug = url.searchParams.get('slug');
+	if (!title || !date || !slug) {
 		return new Response('Missing required parameters', { status: 400 });
 	}
 
 	const prompt = await generateImagePrompt(title, env);
 	const replicate = new Replicate({ auth: env.REPLICATE_API_TOKEN });
-	const callbackUrl = `https://www.arun.blog/webhooks/replicate/?blogPostDate=${blogPostDate}&blogPostSlug=${blogPostSlug}`;
+	const callbackUrl = `https://www.arun.blog/webhooks/replicate/?date=${date}&slug=${slug}`;
 
 	const output = await replicate.predictions.create({
 		model: "black-forest-labs/flux-schnell",
@@ -141,9 +141,9 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 
 const handleReplicateWebhook = async (request: Request, env: Env) => {
 	const url = new URL(request.url);
-	const blogPostDate = url.searchParams.get('blogPostDate');
-	const blogPostSlug = url.searchParams.get('blogPostSlug');
-	if (!blogPostDate || !blogPostSlug) {
+	const date = url.searchParams.get('date');
+	const slug = url.searchParams.get('slug');
+	if (!date || !slug) {
 		return new Response('Missing blog post date or slug', { status: 400 });
 	}
 
@@ -151,7 +151,7 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
 	for (const output of payload.output) {
 		const imageBody = await fetch(output).then(r => r.arrayBuffer());
 		await env.PORTFOLIO_BUCKET.put(
-			`blog/sandbox/${blogPostDate}-${blogPostSlug}/${payload.id}.${output.split('.').pop()}`,
+			`blog/sandbox/${date}-${slug}/${payload.id}.${output.split('.').pop()}`,
 			imageBody
 		);
 	}
