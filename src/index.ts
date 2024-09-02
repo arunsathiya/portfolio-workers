@@ -18,6 +18,12 @@ interface Env {
 	R2_BUCKET_NAME: string;
 	CLOUDFLARE_R2_ACCESS_KEY_ID: string;
 	CLOUDFLARE_R2_SECRET_ACCESS_KEY: string;
+	BlogAssets: KVNamespace,
+}
+
+interface CachedSignedUrl {
+	url: string;
+	refreshTime: number;
 }
 
 export default {
@@ -32,7 +38,6 @@ export default {
 		});
 		const url = new URL(request.url);
 
-		// Only handle requests to /cdn path
 		if (!url.pathname.startsWith('/cdn/')) {
 			// Pass through to origin for all other requests
 			const response = await fetch(request);
@@ -42,19 +47,25 @@ export default {
 			});
 		}
 
-		// Extract the key from the URL
-		const key = url.pathname.slice(5); // Remove '/cdn/' prefix
+		const key = url.pathname.slice(5);
 		console.log('Key:', key);
 
 		try {
-			const command = new GetObjectCommand({
-				Bucket: env.R2_BUCKET_NAME,
-				Key: key,
-			});
-
-			const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-
-			// Redirect to the signed URL
+			let cache = await env.BlogAssets.get<CachedSignedUrl>(key, `json`);
+			let signedUrl: string;
+			if (!cache || Date.now() > cache.refreshTime) {
+				const command = new GetObjectCommand({
+					Bucket: env.R2_BUCKET_NAME,
+					Key: key,
+				});
+				signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+				await env.BlogAssets.put(key, JSON.stringify({
+					url: signedUrl,
+					refreshTime: Date.now() + 55 * 60 * 1000,
+				}), { expirationTtl: 3600 });
+			} else {
+				signedUrl = cache.url;
+			}
 			const response = await fetch(signedUrl);
 			return new Response(response.body as BodyInit, {
 				status: response.status,
