@@ -117,9 +117,27 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 		return new Response('Missing authorization header', { status: 401 });
 	}
 
-	const title = url.searchParams.get('generateImageTitle');
-	const date = url.searchParams.get('date');
-	const slug = url.searchParams.get('slug');
+	let data: Record<string, string>;
+	const contentType = request.headers.get('content-type');
+
+	if (contentType?.includes('application/json')) {
+		try {
+			data = await request.json();
+		} catch (error) {
+			return new Response('Invalid JSON', { status: 400 });
+		}
+	} else if (contentType?.includes('application/x-www-form-urlencoded')) {
+		const formData = await request.formData();
+		data = Object.fromEntries(formData) as Record<string, string>;
+	} else {
+		return new Response('Unsupported input', { status: 415 });
+	}
+
+	if (typeof data !== 'object' || data === null) {
+		return new Response('Invalid data format', { status: 400 });
+	}
+
+	const { title, date, slug } = data;
 	if (!title || !date || !slug) {
 		return new Response('Missing required parameters', { status: 400 });
 	}
