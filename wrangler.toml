@@ -6,8 +6,6 @@ compatibility_flags = ["nodejs_compat"]
 routes = [
     { pattern = "www.arun.blog/*", custom_domain = false, zone_name = "arun.blog" },
     { pattern = "arun.blog/*", custom_domain = false, zone_name = "arun.blog" },
-    { pattern = "arun.blog/security.txt", custom_domain = false, zone_name = "arun.blog" },
-    { pattern = "www.arun.blog/security.txt", custom_domain = false, zone_name = "arun.blog" },
 ]
 
 # Automatically place your workloads in an optimal location to minimize latency.
