@@ -173,19 +173,12 @@ export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 		const s3Client = createS3Client(env);
-		let response;
 
 		if (url.pathname.startsWith('/cdn/')) {
 			return handleCDNRequest(request, env, s3Client)
 		}
 
 		switch (url.pathname) {
-			case '/security.txt':
-				response = await fetch(`https://www.arun.blog/.well-known/security.txt`);
-				return new Response(response.body as BodyInit, {
-					status: response.status,
-					headers: response.headers,
-				});
 			case '/api/generate-image':
 				if (request.method !== 'POST') {
 					return new Response('Method not allowed', { status: 405 });
@@ -197,7 +190,7 @@ export default {
 				}
 				return handleReplicateWebhook(request, env);
 			default:
-				response = await fetch(request);
+				const response = await fetch(request);
 				return new Response(response.body as BodyInit, {
 					status: response.status,
 					headers: response.headers,
