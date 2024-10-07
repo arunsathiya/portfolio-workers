@@ -184,7 +184,7 @@ export default {
 					return new Response('Method not allowed', { status: 405 });
 				}
 				return handleImageGeneration(request, env);
-			case '/webhooks/replicate':
+			case '/webhooks/replicate/':
 				if (request.method !== 'POST') {
 					return new Response('Method not allowed', { status: 405 });
 				}
