@@ -6,10 +6,10 @@ compatibility_flags = ["nodejs_compat"]
 routes = [
     { pattern = "arun.blog/cdn/*", zone_name = "arun.blog" },
     { pattern = "arun.blog/api/generate-image", zone_name = "arun.blog" },
-    { pattern = "arun.blog/webhooks/replicate", zone_name = "arun.blog" },
+    { pattern = "arun.blog/webhooks/replicate*", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/cdn/*", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/api/generate-image", zone_name = "arun.blog" },
-    { pattern = "www.arun.blog/webhooks/replicate", zone_name = "arun.blog" },
+    { pattern = "www.arun.blog/webhooks/replicate*", zone_name = "arun.blog" },
 ]
 
 # Automatically place your workloads in an optimal location to minimize latency.
