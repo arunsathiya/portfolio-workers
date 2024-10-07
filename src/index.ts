@@ -185,9 +185,7 @@ export default {
 				}
 				return handleImageGeneration(request, env);
 			case '/webhooks/replicate':
-				if (request.method !== 'POST') {
-					return new Response('Method not allowed', { status: 405 });
-				}
+				console.log(`Replicate webhook received with method: ${request.method}`);
 				return handleReplicateWebhook(request, env);
 			default:
 				return new Response('Not Found', { status: 404 });
