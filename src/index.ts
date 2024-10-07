@@ -139,14 +139,13 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 	const replicate = new Replicate({ auth: env.REPLICATE_API_TOKEN });
 	const callbackUrl = `https://www.arun.blog/webhooks/replicate?date=${date}&slug=${slug}`;
 
-	const output = await replicate.predictions.create({
+	await replicate.predictions.create({
 		model: "black-forest-labs/flux-schnell",
 		input: { prompt, num_outputs: 4, aspect_ratio: "16:9" },
 		webhook: callbackUrl,
-		webhook_events_filter: ["output"]
+		webhook_events_filter: ["completed"]
 	});
 
-	console.log('Replicate output:', output);
 	return new Response(`Requested image generation for ${title}`, { status: 200 });
 };
 
@@ -159,13 +158,17 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
 	}
 
 	const payload: ReplicatePrediction = await request.json();
-	for (const output of payload.output) {
-		const imageBody = await fetch(output).then(r => r.arrayBuffer());
-		await env.PORTFOLIO_BUCKET.put(
-			`blog/sandbox/${date}-${slug}/${payload.id}.${output.split('.').pop()}`,
-			imageBody
-		);
+	if (!Array.isArray(payload.output)) {
+		return new Response('Invalid output format', { status: 400 });
 	}
+	const uploadPromises = payload.output.map(async (output, index) => {
+		const imageBody = await fetch(output).then(r => r.arrayBuffer());
+		const fileExtension = output.split('.').pop() || 'webp';
+		const fileName = `blog/sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
+		return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
+	});
+	await Promise.all(uploadPromises);
+
 	return new Response('OK', { status: 200 });
 };
 
