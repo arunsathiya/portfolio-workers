@@ -175,7 +175,7 @@ export default {
 		const s3Client = createS3Client(env);
 
 		if (url.pathname.startsWith('/cdn/')) {
-			return handleCDNRequest(request, env, s3Client)
+			return handleCDNRequest(request, env, s3Client);
 		}
 
 		switch (url.pathname) {
@@ -190,11 +190,7 @@ export default {
 				}
 				return handleReplicateWebhook(request, env);
 			default:
-				const response = await fetch(request);
-				return new Response(response.body as BodyInit, {
-					status: response.status,
-					headers: response.headers,
-				});
+				return new Response('Not Found', { status: 404 });
 		}
 	},
 } satisfies ExportedHandler<Env>;
