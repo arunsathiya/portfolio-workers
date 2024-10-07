@@ -137,7 +137,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 
 	const prompt = await generateImagePrompt(title, env);
 	const replicate = new Replicate({ auth: env.REPLICATE_API_TOKEN });
-	const callbackUrl = `https://www.arun.blog/webhooks/replicate/?date=${date}&slug=${slug}`;
+	const callbackUrl = `https://www.arun.blog/webhooks/replicate?date=${date}&slug=${slug}`;
 
 	const output = await replicate.predictions.create({
 		model: "black-forest-labs/flux-schnell",
@@ -184,7 +184,7 @@ export default {
 					return new Response('Method not allowed', { status: 405 });
 				}
 				return handleImageGeneration(request, env);
-			case '/webhooks/replicate/':
+			case '/webhooks/replicate':
 				if (request.method !== 'POST') {
 					return new Response('Method not allowed', { status: 405 });
 				}
