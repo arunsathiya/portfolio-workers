@@ -143,7 +143,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 		model: "black-forest-labs/flux-schnell",
 		input: { prompt, num_outputs: 4, aspect_ratio: "16:9" },
 		webhook: callbackUrl,
-		webhook_events_filter: ["completed"]
+		webhook_events_filter: ["output"]
 	});
 
 	console.log('Replicate output:', output);
