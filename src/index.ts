@@ -1,6 +1,6 @@
 import { GetObjectCommand, RequestProgress, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import Replicate, { validateWebhook } from "replicate";
+import Replicate, { validateWebhook, ApiError } from "replicate";
 import Anthropic from "@anthropic-ai/sdk";
 
 interface Env {
@@ -139,14 +139,27 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 	const replicate = new Replicate({ auth: env.REPLICATE_API_TOKEN });
 	const callbackUrl = `https://www.arun.blog/webhooks/replicate?date=${date}&slug=${slug}`;
 
-	await replicate.predictions.create({
-		model: "black-forest-labs/flux-schnell",
-		input: { prompt, num_outputs: 4, aspect_ratio: "16:9" },
-		webhook: callbackUrl,
-		webhook_events_filter: ["completed"]
-	});
-
-	return new Response(`Requested image generation for ${title}`, { status: 200 });
+	try {
+		await replicate.predictions.create({
+			model: "black-forest-labs/flux-schnell",
+			input: { prompt, num_outputs: 4, aspect_ratio: "16:9" },
+			webhook: callbackUrl,
+			webhook_events_filter: ["completed"]
+		});
+		return new Response(`Requested image generation for ${title}`, { status: 200 });
+	} catch (error) {
+		if (error && typeof error === 'object' && 'response' in error) {
+			const apiError = error as { response?: { status?: number } };
+			console.error('Replicate API error:', error);
+			if (apiError.response && apiError.response.status === 402) {
+				console.error('Monthly spend limit reached');
+				return new Response('Monthly spend limit reached. Please check your account.', { status: 402 });
+			}
+			return new Response('API error occurred', { status: apiError.response?.status || 500 });
+		}
+		console.error('Unexpected error:', error);
+		return new Response('An unexpected error occurred', { status: 500 });
+	}
 };
 
 const handleReplicateWebhook = async (request: Request, env: Env) => {
