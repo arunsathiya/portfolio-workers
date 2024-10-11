@@ -1,6 +1,5 @@
 {
   "name": "portfolio-workers",
-  "version": "0.0.0",
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy",
@@ -10,16 +9,16 @@
     "cf-typegen": "wrangler types"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.4.5",
-    "@cloudflare/workers-types": "^4.20240821.1",
-    "typescript": "^5.5.2",
-    "vitest": "1.5.0",
-    "wrangler": "^3.75.0"
+    "@cloudflare/vitest-pool-workers": "^0.5.18",
+    "@cloudflare/workers-types": "^4.20241011.0",
+    "typescript": "^5.6.3",
+    "vitest": "2.1.2",
+    "wrangler": "^3.80.4"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.27.1",
-    "@aws-sdk/client-s3": "^3.637.0",
-    "@aws-sdk/s3-request-presigner": "^3.637.0",
-    "replicate": "^0.32.1"
+    "@anthropic-ai/sdk": "^0.29.0",
+    "@aws-sdk/client-s3": "^3.670.0",
+    "@aws-sdk/s3-request-presigner": "^3.670.0",
+    "replicate": "^1.0.0"
   }
 }
