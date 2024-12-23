@@ -91,12 +91,12 @@ const generateImagePrompt = async (title: string, env: Env) => {
 		model: "claude-3-5-sonnet-20240620",
 		max_tokens: 1000,
 		temperature: 0,
-		system: "reply only with the generated prompt and nothing else",
+		system: "Reply only with the generated prompt and not anything else",
 		messages: [{
 			"role": "user",
 			"content": [{
 				"type": "text",
-				"text": `this is the prompt I have for the attached image:\n\n${basePrompt}\n\ncan you generate a similar prompt with creative materials relating to the blog post titled "${title}"?`
+				"text": `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background?`
 			}]
 		}]
 	});
