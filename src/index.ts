@@ -96,7 +96,7 @@ const generateImagePrompt = async (title: string, env: Env) => {
 			"role": "user",
 			"content": [{
 				"type": "text",
-				"text": `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background?`
+				"text": `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background? Dark background doesn't necessarily have to be black, blue or purple. It can be any dark color.`,
 			}]
 		}]
 	});
