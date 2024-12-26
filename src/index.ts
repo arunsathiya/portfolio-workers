@@ -255,7 +255,8 @@ const handleGitHubWorkflow = async (request: Request, env: Env) => {
           'Accept': 'application/vnd.github+json',
           'Authorization': `Bearer ${env.GITHUB_PAT}`,
           'X-GitHub-Api-Version': '2022-11-28',
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'User-Agent': 'Cloudflare-Worker'
         },
         body: JSON.stringify(workflowDispatch)
       }
