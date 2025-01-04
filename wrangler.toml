@@ -4,11 +4,13 @@ main = "src/index.ts"
 compatibility_date = "2024-08-21"
 compatibility_flags = ["nodejs_compat"]
 routes = [
-    { pattern = "arun.blog/cdn/*", zone_name = "arun.blog" },
+    { pattern = "arun.blog/assets/*", zone_name = "arun.blog" },
     { pattern = "arun.blog/api/generate-image", zone_name = "arun.blog" },
+    { pattern = "arun.blog/api/trigger-github-workflow", zone_name = "arun.blog" },
     { pattern = "arun.blog/webhooks/replicate*", zone_name = "arun.blog" },
-    { pattern = "www.arun.blog/cdn/*", zone_name = "arun.blog" },
+    { pattern = "www.arun.blog/assets/*", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/api/generate-image", zone_name = "arun.blog" },
+	{ pattern = "www.arun.blog/api/trigger-github-workflow", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/webhooks/replicate*", zone_name = "arun.blog" },
 ]
 

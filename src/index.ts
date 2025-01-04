@@ -77,9 +77,9 @@ const createS3Client = (env: Env) => new S3Client({
   },
 });
 
-const handleCDNRequest = async (request: Request, env: Env, s3Client: S3Client) => {
+const handleAssets = async (request: Request, env: Env, s3Client: S3Client) => {
   const url = new URL(request.url);
-  const key = url.pathname.slice(5);
+  const key = url.pathname.slice(1);
   console.log('Key:', key);
 
   try {
@@ -164,7 +164,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
     const dateSlugCombo = latestPage.properties["Date slug combo frontmatter"].formula.string;
     const titleElements = latestPage.properties.Title.title.map(t => t.plain_text.trim());
     const title = titleElements.length > 0 ? titleElements.join('') : 'Untitled';
-    
+
     // Extract date and slug from dateSlugCombo
     const [date, ...slugParts] = dateSlugCombo.split('-');
     const slug = slugParts.join('-');
@@ -186,7 +186,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
       date,
       slug,
       status: 'Image generation requested'
-    }), { 
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
@@ -278,8 +278,8 @@ const handleGitHubWorkflow = async (request: Request, env: Env) => {
   } catch (error) {
     console.error('Error:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error occurred' }), 
-      { 
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error occurred' }),
+      {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       }
@@ -302,7 +302,7 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
   const uploadPromises = payload.output.map(async (output, index) => {
     const imageBody = await fetch(output).then(r => r.arrayBuffer());
     const fileExtension = output.split('.').pop() || 'webp';
-    const fileName = `blog/sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
+    const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
     return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
   });
   await Promise.all(uploadPromises);
@@ -315,8 +315,8 @@ export default {
     const url = new URL(request.url);
     const s3Client = createS3Client(env);
 
-    if (url.pathname.startsWith('/cdn/')) {
-      return handleCDNRequest(request, env, s3Client);
+    if (url.pathname.startsWith('/assets/')) {
+      return handleAssets(request, env, s3Client);
     }
 
     switch (url.pathname) {
