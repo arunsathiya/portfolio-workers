@@ -11,6 +11,8 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.5.18",
     "@cloudflare/workers-types": "^4.20241011.0",
+    "@vitest/runner": "^2.1.8",
+    "@vitest/snapshot": "^2.1.8",
     "typescript": "^5.6.3",
     "vitest": "2.1.2",
     "wrangler": "^3.80.4"
@@ -20,5 +22,6 @@
     "@aws-sdk/client-s3": "^3.670.0",
     "@aws-sdk/s3-request-presigner": "^3.670.0",
     "replicate": "^1.0.0"
-  }
+  },
+  "packageManager": "yarn@4.6.0"
 }
