@@ -55,6 +55,11 @@ interface NotionResponse {
           plain_text: string;
         }[];
       };
+      "Generate Image Title": {
+        rich_text: {
+          plain_text: string;
+        }[];
+      };
     };
     last_edited_time: string;
   }[];
@@ -119,7 +124,7 @@ const generateImagePrompt = async (title: string, env: Env) => {
     model: "claude-3-5-sonnet-20240620",
     max_tokens: 1000,
     temperature: 0,
-    system: "Reply only with the generated prompt and not anything else",
+    system: "Reply only with the generated prompt and not anything else, including any prefix message that the requested prompt is generated.",
     messages: [{
       "role": "user",
       "content": [{
@@ -169,8 +174,11 @@ const handleImageGeneration = async (request: Request, env: Env) => {
     const [date, ...slugParts] = dateSlugCombo.split('-');
     const slug = slugParts.join('-');
 
+    // Extract image generation prompt
+    const imageTitle = latestPage.properties["Generate Image Title"].rich_text[0].plain_text;
+
     // Generate and trigger image creation
-    const prompt = await generateImagePrompt(title, env);
+    const prompt = await generateImagePrompt(imageTitle, env);
     const replicate = new Replicate({ auth: env.REPLICATE_API_TOKEN });
     const callbackUrl = `https://www.arun.blog/webhooks/replicate?date=${date}&slug=${slug}`;
 
@@ -182,7 +190,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
     });
 
     return new Response(JSON.stringify({
-      title,
+      imageTitle,
       date,
       slug,
       status: 'Image generation requested'
