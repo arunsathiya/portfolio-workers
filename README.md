@@ -62,7 +62,7 @@ GITHUB_PAT=
 
 - Cloudflare Workers
 - Cloudflare R2 Storage
-- KV Namespace for BlogAssets
+- Cloudflare Workers KV Namespace
 - Notion Database
 - GitHub Repository
 - Replicate Account
