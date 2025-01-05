@@ -1,6 +1,6 @@
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import Replicate, { ApiError } from 'replicate';
+import Replicate, { ApiError, validateWebhook } from 'replicate';
 import Anthropic from "@anthropic-ai/sdk";
 
 import { Buffer } from 'node:buffer';
@@ -330,6 +330,10 @@ const handleGitHubWorkflow = async (request: Request, env: Env) => {
 };
 
 const handleReplicateWebhook = async (request: Request, env: Env) => {
+	const valid = await validateWebhook(request, env.REPLICATE_WEBHOOK_SIGNING_KEY);
+	if (!valid) {
+		return new Response('Invalid webhook signature', { status: 401 });
+	}
   const url = new URL(request.url);
   const date = url.searchParams.get('date');
   const slug = url.searchParams.get('slug');
