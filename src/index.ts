@@ -334,26 +334,24 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
 	if (!valid) {
 		return new Response('Invalid webhook signature', { status: 401 });
 	}
-  const url = new URL(request.url);
-  const date = url.searchParams.get('date');
-  const slug = url.searchParams.get('slug');
-  if (!date || !slug) {
+	const url = new URL(request.url);
+	const date = url.searchParams.get('date');
+	const slug = url.searchParams.get('slug');
+	if (!date || !slug) {
     return new Response('Missing blog post date or slug', { status: 400 });
   }
-
-  const payload: ReplicatePrediction = await request.json();
-  if (!Array.isArray(payload.output)) {
+	const payload: ReplicatePrediction = await request.json();
+	if (!Array.isArray(payload.output)) {
     return new Response('Invalid output format', { status: 400 });
   }
-  const uploadPromises = payload.output.map(async (output, index) => {
-    const imageBody = await fetch(output).then(r => r.arrayBuffer());
-    const fileExtension = output.split('.').pop() || 'webp';
-    const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
-    return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
-  });
-  await Promise.all(uploadPromises);
-
-  return new Response('OK', { status: 200 });
+	const uploadPromises = payload.output.map(async (output, index) => {
+		const imageBody = await fetch(output).then(r => r.arrayBuffer());
+		const fileExtension = output.split('.').pop() || 'webp';
+		const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
+		return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
+	});
+	await Promise.all(uploadPromises);
+	return new Response('OK', { status: 200 });
 };
 
 export default {
