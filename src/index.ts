@@ -3,6 +3,8 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import Replicate, { validateWebhook, ApiError } from "replicate";
 import Anthropic from "@anthropic-ai/sdk";
 
+import { Buffer } from 'node:buffer';
+
 interface Env {
   CLOUDFLARE_ACCOUNT_ID: string;
   R2_BUCKET_NAME: string;
@@ -120,18 +122,35 @@ const generateImagePrompt = async (title: string, env: Env) => {
     throw new Error('IMAGE_GENERATION_BASE_PROMPT not found in environment variables');
   }
   const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+	const image_url = "https://closet.tools/uploads/poshmark-algorithm.png"
+	const image_media_type = "image/png"
+	const image_array_buffer = await ((await fetch(image_url)).arrayBuffer());
+	const image_data = Buffer.from(image_array_buffer).toString('base64');
   const msg = await anthropic.messages.create({
     model: "claude-3-5-sonnet-latest",
     max_tokens: 1000,
     temperature: 0,
     system: "Reply only with the generated prompt and not anything else, including any prefix message that the requested prompt is generated.",
-    messages: [{
-      "role": "user",
-      "content": [{
-        "type": "text",
-        "text": `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background? Dark background doesn't necessarily have to be black, blue or purple. It can be any dark color. Aim to match the same font styling as in the base prompt.`,
-      }]
-    }]
+    messages: [
+			{
+				"role": "user",
+				"content": [{
+					"type": "text",
+					"text": `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background? Dark background doesn't necessarily have to be black, blue or purple. It can be any dark color. Aim to match the same font styling as in the base prompt.`,
+				}]
+			},
+			{
+				"role": "user",
+				"content": [{
+					"type": "image",
+					"source": {
+						"type": "base64",
+						"media_type": image_media_type,
+						"data": image_data,
+					},
+				}]
+			},
+		]
   });
   return msg.content[0].type === "text" ? msg.content[0].text : "";
 };
@@ -139,7 +158,7 @@ const generateImagePrompt = async (title: string, env: Env) => {
 const handleImageGeneration = async (request: Request, env: Env) => {
   const authToken = request.headers.get('Authorization');
   if (!authToken || authToken !== `Bearer ${env.IMAGE_GENERATION_SECRET}`) {
-    return new Response('Unauthorized', { status: 401 });
+    return new Response(`Unauthorized`, { status: 401 });
   }
 
   try {
