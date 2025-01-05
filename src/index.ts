@@ -1,6 +1,6 @@
-import { GetObjectCommand, RequestProgress, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import Replicate, { validateWebhook, ApiError } from "replicate";
+import Replicate, { ApiError } from 'replicate';
 import Anthropic from "@anthropic-ai/sdk";
 
 import { Buffer } from 'node:buffer';
@@ -155,6 +155,18 @@ const generateImagePrompt = async (title: string, env: Env) => {
   return msg.content[0].type === "text" ? msg.content[0].text : "";
 };
 
+function isReplicateApiError(error: unknown): error is ApiError {
+  return (
+    error instanceof Error &&
+    error !== null &&
+    typeof error === 'object' &&
+    'request' in error &&
+    'response' in error &&
+    error.request instanceof Request &&
+    error.response instanceof Response
+  );
+}
+
 const handleImageGeneration = async (request: Request, env: Env) => {
   const authToken = request.headers.get('Authorization');
   if (!authToken || authToken !== `Bearer ${env.IMAGE_GENERATION_SECRET}`) {
@@ -218,14 +230,17 @@ const handleImageGeneration = async (request: Request, env: Env) => {
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error) {
-    if (error && typeof error === 'object' && 'response' in error) {
-      const apiError = error as { response?: { status?: number } };
-      console.error('Replicate API error:', error);
-      if (apiError.response && apiError.response.status === 402) {
-        return new Response('Monthly spend limit reached. Please check your account.', { status: 402 });
-      }
-      return new Response('API error occurred', { status: apiError.response?.status || 500 });
-    }
+		if (isReplicateApiError(error)) {
+			const status = error.response.status;
+			switch (status) {
+				case 402:
+					return new Response('Monthly spend limit reached.', { status: 402 });
+				case 429:
+					return new Response('Rate limit reached. Please try again later.', { status: 429 });
+				default:
+					return new Response('API error occurred', { status: status });
+			}
+		}
     console.error('Unexpected error:', error);
     return new Response('An unexpected error occurred', { status: 500 });
   }
