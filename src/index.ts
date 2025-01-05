@@ -121,7 +121,7 @@ const generateImagePrompt = async (title: string, env: Env) => {
   }
   const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   const msg = await anthropic.messages.create({
-    model: "claude-3-5-sonnet-20241022",
+    model: "claude-3-5-sonnet-latest",
     max_tokens: 1000,
     temperature: 0,
     system: "Reply only with the generated prompt and not anything else, including any prefix message that the requested prompt is generated.",
