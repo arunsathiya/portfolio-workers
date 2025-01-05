@@ -47,7 +47,12 @@ interface ReplicatePrediction {
 interface NotionResponse {
   results: {
     properties: {
-      "Date slug combo frontmatter": {
+      "Date frontmatter": {
+        formula: {
+          string: string;
+        };
+      };
+      "Slug frontmatter": {
         formula: {
           string: string;
         };
@@ -196,14 +201,9 @@ const handleImageGeneration = async (request: Request, env: Env) => {
     const latestPage = notionData.results
       .sort((a, b) => b.last_edited_time.localeCompare(a.last_edited_time))[0];
 
-    // Extract required fields
-    const dateSlugCombo = latestPage.properties["Date slug combo frontmatter"].formula.string;
-    const titleElements = latestPage.properties.Title.title.map(t => t.plain_text.trim());
-    const title = titleElements.length > 0 ? titleElements.join('') : 'Untitled';
-
-    // Extract date and slug from dateSlugCombo
-    const [date, ...slugParts] = dateSlugCombo.split('-');
-    const slug = slugParts.join('-');
+    // Extract date and slug
+    const date = latestPage.properties["Date frontmatter"].formula.string;
+    const slug = latestPage.properties["Slug frontmatter"].formula.string;
 
     // Extract image generation prompt
     const imageTitle = latestPage.properties["Generate Image Title"].rich_text[0].plain_text;
@@ -276,7 +276,8 @@ const handleGitHubWorkflow = async (request: Request, env: Env) => {
       .sort((a, b) => b.last_edited_time.localeCompare(a.last_edited_time))[0];
 
     // Extract fields
-    const dateSlugCombo = latestPage.properties["Date slug combo frontmatter"].formula.string;
+    const date = latestPage.properties["Date frontmatter"].formula.string;
+    const slug = latestPage.properties["Slug frontmatter"].formula.string;
     const titleElements = latestPage.properties.Title.title.map(t => t.plain_text.trim());
     const title = titleElements.length > 0 ? titleElements.join('') : 'Untitled';
 
@@ -285,7 +286,7 @@ const handleGitHubWorkflow = async (request: Request, env: Env) => {
       ref: 'main',
       inputs: {
         commit_message: title,
-        date_slug_combo: dateSlugCombo
+        date_slug_combo: `${date}-${slug}`,
       }
     };
 
@@ -309,7 +310,7 @@ const handleGitHubWorkflow = async (request: Request, env: Env) => {
     }
 
     return new Response(JSON.stringify({
-      date_slug_combo: dateSlugCombo,
+      date_slug_combo: `${date}-${slug}`,
       title,
       status: 'GitHub workflow triggered'
     }), {
@@ -330,7 +331,12 @@ const handleGitHubWorkflow = async (request: Request, env: Env) => {
 };
 
 const handleReplicateWebhook = async (request: Request, env: Env) => {
-	const valid = await validateWebhook(request, env.REPLICATE_WEBHOOK_SIGNING_KEY);
+	const rawBody = await request.text();
+	const valid = await validateWebhook(new Request(request.url, {
+		method: request.method,
+		headers: request.headers,
+		body: rawBody
+	}), env.REPLICATE_WEBHOOK_SIGNING_KEY);
 	if (!valid) {
 		return new Response('Invalid webhook signature', { status: 401 });
 	}
@@ -340,7 +346,7 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
 	if (!date || !slug) {
     return new Response('Missing blog post date or slug', { status: 400 });
   }
-	const payload: ReplicatePrediction = await request.json();
+	const payload: ReplicatePrediction = JSON.parse(rawBody)
 	if (!Array.isArray(payload.output)) {
     return new Response('Invalid output format', { status: 400 });
   }
