@@ -19,11 +19,23 @@ interface Env {
   ANTHROPIC_API_KEY: string;
   NOTION_TOKEN: string;
   GITHUB_PAT: string;
+	DISPATCH_SECRET: string;
 }
 
 interface CachedSignedUrl {
   url: string;
   refreshTime: number;
+}
+
+interface DispatchRequest {
+  commit_message?: string;
+}
+
+interface GitHubDispatch {
+  event_type: string;
+  client_payload: {
+    commit_message: string;
+  };
 }
 
 interface ReplicatePrediction {
@@ -171,6 +183,62 @@ function isReplicateApiError(error: unknown): error is ApiError {
     error.response instanceof Response
   );
 }
+
+const handleGitHubDispatch = async (request: Request, env: Env) => {
+  const authToken = request.headers.get('Authorization');
+  if (!authToken || authToken !== `Bearer ${env.DISPATCH_SECRET}`) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  try {
+    const body = await request.json() as DispatchRequest;
+    const commit_message = body.commit_message || "chore: update from notion";
+
+    const dispatch: GitHubDispatch = {
+      event_type: "chore: fetch and commit Notion changes",
+      client_payload: {
+        commit_message
+      }
+    };
+
+    const githubResponse = await fetch(
+      `https://api.github.com/repos/arunsathiya/portfolio/dispatches`,
+      {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'Authorization': `Bearer ${env.GITHUB_PAT}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Cloudflare-Worker'
+        },
+        body: JSON.stringify(dispatch)
+      }
+    );
+
+    if (!githubResponse.ok) {
+      throw new Error(`GitHub API error: ${githubResponse.statusText}`);
+    }
+
+    return new Response(JSON.stringify({
+      commit_message,
+      status: 'GitHub repository dispatch triggered'
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error occurred' }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+  }
+};
 
 const handleImageGeneration = async (request: Request, env: Env) => {
   const authToken = request.headers.get('Authorization');
@@ -380,6 +448,11 @@ export default {
           return new Response('Method not allowed', { status: 405 });
         }
         return handleGitHubWorkflow(request, env);
+			case '/api/dispatch':
+				if (request.method !== 'POST') {
+					return new Response('Method not allowed', { status: 405 });
+				}
+				return handleGitHubDispatch(request, env);
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
       default:
