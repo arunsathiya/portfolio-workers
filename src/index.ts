@@ -207,7 +207,7 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
         method: 'POST',
         headers: {
           'Accept': 'application/vnd.github+json',
-          'Authorization': `Bearer ${env.GITHUB_PAT}`,
+          'Authorization': `Bearer ${env.DISPATCH_SECRET}`,
           'X-GitHub-Api-Version': '2022-11-28',
           'Content-Type': 'application/json',
           'User-Agent': 'Cloudflare-Worker'
