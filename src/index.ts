@@ -192,7 +192,7 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
 
   try {
     const body = await request.json() as DispatchRequest;
-    const commit_message = body.commit_message || "chore: update from notion";
+    const commit_message = body.commit_message || "chore: update from Notion";
 
     const dispatch: GitHubDispatch = {
       event_type: "chore: fetch and commit Notion changes",
