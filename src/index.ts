@@ -19,7 +19,7 @@ interface Env {
   ANTHROPIC_API_KEY: string;
   NOTION_TOKEN: string;
   GITHUB_PAT: string;
-	DISPATCH_SECRET: string;
+  DISPATCH_SECRET: string;
 }
 
 interface CachedSignedUrl {
@@ -139,35 +139,35 @@ const generateImagePrompt = async (title: string, env: Env) => {
     throw new Error('IMAGE_GENERATION_BASE_PROMPT not found in environment variables');
   }
   const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-	const image_url = "https://closet.tools/uploads/poshmark-algorithm.png"
-	const image_media_type = "image/png"
-	const image_array_buffer = await ((await fetch(image_url)).arrayBuffer());
-	const image_data = Buffer.from(image_array_buffer).toString('base64');
+  const image_url = "https://closet.tools/uploads/poshmark-algorithm.png"
+  const image_media_type = "image/png"
+  const image_array_buffer = await ((await fetch(image_url)).arrayBuffer());
+  const image_data = Buffer.from(image_array_buffer).toString('base64');
   const msg = await anthropic.messages.create({
     model: "claude-3-5-sonnet-latest",
     max_tokens: 1000,
     temperature: 0,
     system: "Reply only with the generated prompt and not anything else, including any prefix message that the requested prompt is generated.",
     messages: [
-			{
-				"role": "user",
-				"content": [{
-					"type": "text",
-					"text": `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background? Dark background doesn't necessarily have to be black, blue or purple. It can be any dark color. Aim to match the same font styling as in the base prompt.`,
-				}]
-			},
-			{
-				"role": "user",
-				"content": [{
-					"type": "image",
-					"source": {
-						"type": "base64",
-						"media_type": image_media_type,
-						"data": image_data,
-					},
-				}]
-			},
-		]
+      {
+        "role": "user",
+        "content": [{
+          "type": "text",
+          "text": `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background? Dark background doesn't necessarily have to be black, blue or purple. It can be any dark color. Aim to match the same font styling as in the base prompt.`,
+        }]
+      },
+      {
+        "role": "user",
+        "content": [{
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": image_media_type,
+            "data": image_data,
+          },
+        }]
+      },
+    ]
   });
   return msg.content[0].type === "text" ? msg.content[0].text : "";
 };
@@ -298,17 +298,17 @@ const handleImageGeneration = async (request: Request, env: Env) => {
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error) {
-		if (isReplicateApiError(error)) {
-			const status = error.response.status;
-			switch (status) {
-				case 402:
-					return new Response('Monthly spend limit reached.', { status: 402 });
-				case 429:
-					return new Response('Rate limit reached. Please try again later.', { status: 429 });
-				default:
-					return new Response('API error occurred', { status: status });
-			}
-		}
+    if (isReplicateApiError(error)) {
+      const status = error.response.status;
+      switch (status) {
+        case 402:
+          return new Response('Monthly spend limit reached.', { status: 402 });
+        case 429:
+          return new Response('Rate limit reached. Please try again later.', { status: 429 });
+        default:
+          return new Response('API error occurred', { status: status });
+      }
+    }
     console.error('Unexpected error:', error);
     return new Response('An unexpected error occurred', { status: 500 });
   }
@@ -399,33 +399,33 @@ const handleGitHubWorkflow = async (request: Request, env: Env) => {
 };
 
 const handleReplicateWebhook = async (request: Request, env: Env) => {
-	const rawBody = await request.text();
-	const valid = await validateWebhook(new Request(request.url, {
-		method: request.method,
-		headers: request.headers,
-		body: rawBody
-	}), env.REPLICATE_WEBHOOK_SIGNING_KEY);
-	if (!valid) {
-		return new Response('Invalid webhook signature', { status: 401 });
-	}
-	const url = new URL(request.url);
-	const date = url.searchParams.get('date');
-	const slug = url.searchParams.get('slug');
-	if (!date || !slug) {
+  const rawBody = await request.text();
+  const valid = await validateWebhook(new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: rawBody
+  }), env.REPLICATE_WEBHOOK_SIGNING_KEY);
+  if (!valid) {
+    return new Response('Invalid webhook signature', { status: 401 });
+  }
+  const url = new URL(request.url);
+  const date = url.searchParams.get('date');
+  const slug = url.searchParams.get('slug');
+  if (!date || !slug) {
     return new Response('Missing blog post date or slug', { status: 400 });
   }
-	const payload: ReplicatePrediction = JSON.parse(rawBody)
-	if (!Array.isArray(payload.output)) {
+  const payload: ReplicatePrediction = JSON.parse(rawBody)
+  if (!Array.isArray(payload.output)) {
     return new Response('Invalid output format', { status: 400 });
   }
-	const uploadPromises = payload.output.map(async (output, index) => {
-		const imageBody = await fetch(output).then(r => r.arrayBuffer());
-		const fileExtension = output.split('.').pop() || 'webp';
-		const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
-		return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
-	});
-	await Promise.all(uploadPromises);
-	return new Response('OK', { status: 200 });
+  const uploadPromises = payload.output.map(async (output, index) => {
+    const imageBody = await fetch(output).then(r => r.arrayBuffer());
+    const fileExtension = output.split('.').pop() || 'webp';
+    const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
+    return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
+  });
+  await Promise.all(uploadPromises);
+  return new Response('OK', { status: 200 });
 };
 
 export default {
@@ -448,11 +448,11 @@ export default {
           return new Response('Method not allowed', { status: 405 });
         }
         return handleGitHubWorkflow(request, env);
-			case '/api/dispatch':
-				if (request.method !== 'POST') {
-					return new Response('Method not allowed', { status: 405 });
-				}
-				return handleGitHubDispatch(request, env);
+      case '/api/dispatch':
+        if (request.method !== 'POST') {
+          return new Response('Method not allowed', { status: 405 });
+        }
+        return handleGitHubDispatch(request, env);
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
       default:
