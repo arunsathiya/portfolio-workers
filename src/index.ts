@@ -793,30 +793,44 @@ const processNotionWebhook = async (
       database_id: databaseId,
     });
 
-    // Process all pages and collect their file changes
+    // Process pages in parallel with a concurrency limit
+    const BATCH_SIZE = 5; // Process 5 pages at a time
     const fileChanges: FileChange[] = [];
 
-    for (const page of pages.results) {
-      try {
-        const { content, path } = await processPage(page.id, env, s3);
-        fileChanges.push({
-          path,
-          content,
-        });
-        console.log('Processed page:', page.id);
-      } catch (error) {
-        console.error(`Error processing page ${page.id}:`, error);
+    // Process pages in batches to avoid overwhelming the system
+    for (let i = 0; i < pages.results.length; i += BATCH_SIZE) {
+      const batch = pages.results.slice(i, i + BATCH_SIZE);
+      const batchPromises = batch.map(async (page) => {
+        try {
+          const { content, path } = await processPage(page.id, env, s3);
+          console.log('Processed page:', page.id);
+          return { path, content };
+        } catch (error) {
+          console.error(`Error processing page ${page.id}:`, error);
+          return null;
+        }
+      });
+
+      // Wait for the current batch to complete
+      const batchResults = await Promise.all(batchPromises);
+
+      // Filter out null results and add to fileChanges
+      fileChanges.push(...batchResults.filter((result): result is FileChange => result !== null));
+
+      // Optional: Add a small delay between batches to prevent rate limiting
+      if (i + BATCH_SIZE < pages.results.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
     if (fileChanges.length > 0) {
       // Commit all changes in a single batch
-      await commitToGitHub(
+      const committed = await commitToGitHub(
         fileChanges,
         `chore: update multiple pages from Notion`,
         env
       );
-      console.log('Successfully committed all page changes');
+      console.log(committed ? 'Successfully committed all page changes' : 'No changes needed');
     } else {
       console.log('No changes to commit');
     }
