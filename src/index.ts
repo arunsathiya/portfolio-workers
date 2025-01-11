@@ -1,4 +1,4 @@
-import { DataRedundancy, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DataRedundancy, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import Replicate, { ApiError, validateWebhook } from 'replicate';
 import Anthropic from "@anthropic-ai/sdk";
@@ -515,7 +515,7 @@ function isParagraphBlock(block: BlockObjectResponse | PartialBlockObjectRespons
 	return 'type' in block && block.type === 'paragraph';
 }
 
-const processPage = async (pageId: string, env: Env) => {
+const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const notion = new Client({ auth: env.NOTION_TOKEN, notionVersion: '2022-06-28', fetch: (input, init) => fetch(input, init) });
   const n2m = new NotionToMarkdown({ notionClient: notion,
 		config: {
@@ -549,13 +549,12 @@ const processPage = async (pageId: string, env: Env) => {
       const imageUrl = block.parent.match(/\((.*?)\)/)?.[1];
       if (imageUrl) {
         try {
-          const blockId = block.blockId || `fallback-${i}`;
-          const imageKey = `${slug}-${blockId}${new URL(imageUrl).pathname.split('.').pop()}`;
-          const { signedUrl } = await uploadImage(imageUrl, slug, blockId, env);
-          const blockObj = await notion.blocks.retrieve({ block_id: blockId }) as ImageBlockObjectResponse;
-          const caption = blockObj.image?.caption[0]?.plain_text || '';
-          mdblocks[i].parent = `<R2Image imageKey="assets/${imageKey}" alt="${caption}" />`;
-        } catch (error) {
+					const blockId = block.blockId || `fallback-${i}`;
+					const blockObj = await notion.blocks.retrieve({ block_id: blockId }) as ImageBlockObjectResponse;
+					const caption = blockObj.image?.caption[0]?.plain_text || '';
+					const { imageKey } = await uploadImage(imageUrl, slug, blockId, env, s3)
+					mdblocks[i].parent = `<R2Image imageKey="assets/${imageKey}" alt="${caption}" />`;
+				} catch (error) {
           console.error(`Failed to upload image: ${imageUrl}`, error);
         }
       }
@@ -605,17 +604,8 @@ ${convertedMdString.replace(/\n\n/g, '\n')}`;
   };
 }
 
-async function uploadImage(imageUrl: string, pageSlug: string, blockId: string): Promise<{ uploaded: boolean; signedUrl: string }> {
+const uploadImage = async (imageUrl: string, pageSlug: string, blockId: string, env: Env, s3: S3Client): Promise<{ uploaded: boolean; imageKey: string }> => {
 	try {
-		const S3 = new S3Client({
-			region: 'auto',
-			endpoint: `https://${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-			credentials: {
-				accessKeyId: env.CLOUDFLARE_R2_ACCESS_KEY_ID!,
-				secretAccessKey: env.CLOUDFLARE_R2_SECRET_ACCESS_KEY!,
-			},
-		});
-
 		// Generate a unique filename using blockId
 		const filename = `${pageSlug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
 		const key = `assets/${filename}`;
@@ -626,12 +616,11 @@ async function uploadImage(imageUrl: string, pageSlug: string, blockId: string):
 				Bucket: env.R2_BUCKET_NAME!,
 				Key: key,
 			});
-			await S3.send(headCommand);
+			await s3.send(headCommand);
 
 			// If we reach here, the file exists. Generate and return a signed URL.
-			console.log('Image already exists in the bucket. Generating signed URL.');
-			const signedUrl = await getSignedUrlForObject(key);
-			return { uploaded: false, signedUrl };
+			console.log('Image already exists in the bucket.');
+			return { uploaded: false, imageKey: key };
 		} catch (error) {
 			// If the file doesn't exist, we'll get an error. Proceed with upload.
 			console.log('Image does not exist in the bucket. Proceeding with upload.');
@@ -656,17 +645,14 @@ async function uploadImage(imageUrl: string, pageSlug: string, blockId: string):
 			ContentType: response.headers.get('content-type') || 'image/png',
 		});
 
-		const result = await S3.send(uploadCommand);
+		const result = await s3.send(uploadCommand);
 
 		if (result.$metadata.httpStatusCode !== 200) {
 			throw new Error(`Upload failed with status code: ${result.$metadata.httpStatusCode}`);
 		}
 
-		// Generate a signed URL
-		const signedUrl = await getSignedUrlForObject(key);
-
-		console.log('Upload successful. Signed URL:', signedUrl);
-		return { uploaded: true, signedUrl };
+		console.log('Upload successful. Key:', key);
+		return { uploaded: true, imageKey: key };
 	} catch (error) {
 		console.error('Error uploading image to R2:', error);
 		if (error instanceof Error) {
@@ -675,15 +661,6 @@ async function uploadImage(imageUrl: string, pageSlug: string, blockId: string):
 		}
 		throw error;
 	}
-}
-
-async function getSignedUrlForObject(key: string): Promise<string> {
-	const getObjectCommand = new GetObjectCommand({
-		Bucket: env.R2_BUCKET_NAME!,
-		Key: key,
-	});
-
-	return getSignedUrl(S3, getObjectCommand, { expiresIn: 3600 }); // URL expires in 1 hour
 }
 
 interface NotionWebhookPayload {
@@ -725,6 +702,7 @@ function isR2Event(payload: any): payload is R2EventMessage {
 
 // Helper function to process Notion webhooks
 const processNotionWebhook = async (payload: NotionWebhookPayload, env: Env) => {
+	const s3 = createS3Client(env)
   const pageId = payload.data.id;
   const databaseId = payload.data.parent.database_id;
 
@@ -733,7 +711,7 @@ const processNotionWebhook = async (payload: NotionWebhookPayload, env: Env) => 
     return;
   }
 
-  const { content, path } = await processPage(pageId, env);
+  const { content, path } = await processPage(pageId, env, s3);
 
   await commitToGitHub(
     path,
