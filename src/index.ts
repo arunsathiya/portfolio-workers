@@ -755,7 +755,7 @@ function isR2Event(payload: any): payload is R2EventMessage {
 // Helper function to process Notion webhooks
 const processNotionWebhook = async (payload: NotionWebhookPayload, request: Request, env: Env) => {
 	const s3 = createS3Client(env)
-	const processAllHeader = request.headers.get('X-Process-All-Pages');
+	const processAllHeader = request.headers.get('x-process-all-pages');
   const pageId = payload.data.id;
   const databaseId = payload.data.parent.database_id;
 
@@ -868,7 +868,7 @@ export default {
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
 			case '/webhooks/notion':
-				const notionSignature = request.headers.get('X-Notion-Signature');
+				const notionSignature = request.headers.get('x-notion-signature');
 				if (!notionSignature || notionSignature !== `Bearer ${env.NOTION_SIGNATURE_SECRET}`) {
 					return new Response('Unauthorized', { status: 401 });
 				}
