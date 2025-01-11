@@ -752,10 +752,27 @@ function isR2Event(payload: any): payload is R2EventMessage {
   return payload && 'action' in payload && 'object' in payload;
 }
 
+interface NotionWebhookContext {
+  headers: Record<string, string>;
+  processAllPages: boolean;
+}
+
+// Updated type definitions
+interface QueueMessageBody {
+  type: 'notion' | 'r2';
+  payload: NotionWebhookPayload | R2EventMessage;
+  headers?: Record<string, string>;
+  processAllPages?: boolean;
+}
+
 // Helper function to process Notion webhooks
-const processNotionWebhook = async (payload: NotionWebhookPayload, request: Request, env: Env) => {
-	const s3 = createS3Client(env)
-	const processAllHeader = request.headers.get('x-process-all-pages');
+const processNotionWebhook = async (
+  payload: NotionWebhookPayload,
+  context: NotionWebhookContext,
+  env: Env
+) => {
+  const s3 = createS3Client(env);
+  const { processAllPages } = context;
   const pageId = payload.data.id;
   const databaseId = payload.data.parent.database_id;
 
@@ -764,43 +781,57 @@ const processNotionWebhook = async (payload: NotionWebhookPayload, request: Requ
     return;
   }
 
-	if (processAllHeader) {
+  if (processAllPages) {
     console.log('Processing all pages in database:', databaseId);
-    const notion = new Client({ auth: env.NOTION_TOKEN, notionVersion: '2022-06-28', fetch: (input, init) => fetch(input, init) });
-		const pages = await notion.databases.query({
-			database_id: databaseId,
-		})
-		const headers = Object.fromEntries(request.headers.entries());
-    delete headers['x-process-all-pages'];
-		for (const page of pages.results) {
-      await env.NOTION_QUEUE.send({
-        type: 'notion',
-        payload: {
-          data: {
-            id: page.id,
-            parent: {
-              database_id: databaseId
-            }
-          }
-        },
-        headers
-      });
-      console.log('Queued page for processing:', page.id);
+    const notion = new Client({
+      auth: env.NOTION_TOKEN,
+      notionVersion: '2022-06-28',
+      fetch: (input, init) => fetch(input, init)
+    });
+
+    const pages = await notion.databases.query({
+      database_id: databaseId,
+    });
+
+    // Process all pages and collect their file changes
+    const fileChanges: FileChange[] = [];
+
+    for (const page of pages.results) {
+      try {
+        const { content, path } = await processPage(page.id, env, s3);
+        fileChanges.push({
+          path,
+          content,
+        });
+        console.log('Processed page:', page.id);
+      } catch (error) {
+        console.error(`Error processing page ${page.id}:`, error);
+      }
     }
-		console.log('Successfully queued all database pages for processing');
+
+    if (fileChanges.length > 0) {
+      // Commit all changes in a single batch
+      await commitToGitHub(
+        fileChanges,
+        `chore: update multiple pages from Notion`,
+        env
+      );
+      console.log('Successfully committed all page changes');
+    } else {
+      console.log('No changes to commit');
+    }
   } else {
+    // Process single page as before
     const { content, path } = await processPage(pageId, env, s3);
-		await commitToGitHub(
-			[{
-				path,
-				content,
-			}],
-			`chore: update ${path}`,
-			env
-		);
+    await commitToGitHub(
+      [{
+        path,
+        content,
+      }],
+      `chore: update ${path}`,
+      env
+    );
   }
-
-
 
   console.log('Successfully processed Notion webhook for page:', pageId);
 }
@@ -867,41 +898,53 @@ export default {
         return handleGitHubDispatch(request, env);
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
-			case '/webhooks/notion':
-				const notionSignature = request.headers.get('x-notion-signature');
-				if (!notionSignature || notionSignature !== `Bearer ${env.NOTION_SIGNATURE_SECRET}`) {
-					return new Response('Unauthorized', { status: 401 });
-				}
-				const payload = await request.json() as NotionWebhookPayload;
-				await env.NOTION_QUEUE.send({
-					type: 'notion',
-					payload,
-					headers: Object.fromEntries(request.headers.entries())
-				});
-				return new Response(JSON.stringify({
-					status: 'accepted',
-					message: 'Webhook received and queued for processing'
-				}), {
-					status: 200,
-					headers: { 'Content-Type': 'application/json' }
-				});
+      case '/webhooks/notion':
+        const notionSignature = request.headers.get('x-notion-signature');
+        if (!notionSignature || notionSignature !== `Bearer ${env.NOTION_SIGNATURE_SECRET}`) {
+          return new Response('Unauthorized', { status: 401 });
+        }
+        const payload = await request.json() as NotionWebhookPayload;
+
+        // Extract relevant headers and process-all flag
+        const relevantHeaders = {
+          'x-notion-signature': notionSignature
+        };
+        const processAllPages = request.headers.has('x-process-all-pages');
+
+        await env.NOTION_QUEUE.send({
+          type: 'notion',
+          payload,
+          headers: relevantHeaders,
+          processAllPages
+        });
+
+        return new Response(JSON.stringify({
+          status: 'accepted',
+          message: 'Webhook received and queued for processing'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
       default:
         return new Response('Not Found', { status: 404 });
     }
   },
-	async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
+
+  async queue(batch: MessageBatch<QueueMessageBody>, env: Env, ctx: ExecutionContext): Promise<void> {
     for (const message of batch.messages) {
       try {
-        const { type, payload, headers } = message.body;
+        const { type, payload, headers, processAllPages } = message.body;
 
         // Handle Notion webhook messages
         if (type === 'notion' && isNotionWebhookPayload(payload)) {
-          // Reconstruct request object with headers
-          const request = new Request('https://dummy-url', {
-            headers: headers
-          });
-
-          await processNotionWebhook(payload, request, env);
+          await processNotionWebhook(
+            payload,
+            {
+              headers: headers || {},
+              processAllPages: processAllPages || false
+            },
+            env
+          );
           message.ack();
           continue;
         }
