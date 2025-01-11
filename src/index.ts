@@ -1,9 +1,13 @@
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DataRedundancy, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import Replicate, { ApiError, validateWebhook } from 'replicate';
 import Anthropic from "@anthropic-ai/sdk";
+import { Client } from '@notionhq/client';
 
 import { Buffer } from 'node:buffer';
+import { BlockObjectResponse, ImageBlockObjectResponse, PageObjectResponse, PartialBlockObjectResponse, RichTextItemResponse, TextRichTextItemResponse } from '@notionhq/client/build/src/api-endpoints';
+import { NotionToMarkdown } from 'notion-to-md';
+import path from 'node:path';
 
 interface Env {
   CLOUDFLARE_ACCOUNT_ID: string;
@@ -18,8 +22,10 @@ interface Env {
   PORTFOLIO_BUCKET: R2Bucket;
   ANTHROPIC_API_KEY: string;
   NOTION_TOKEN: string;
+	NOTION_DATABASE_ID: string;
   GITHUB_PAT: string;
   DISPATCH_SECRET: string;
+	NOTION_QUEUE: Queue<NotionWebhookPayload>;
 }
 
 interface CachedSignedUrl {
@@ -462,6 +468,319 @@ async function getLatestCommitOid(env: Env): Promise<string> {
   return result.data.repository.defaultBranchRef.target.oid;
 }
 
+interface NotionWebhookPayload {
+  source: {
+    type: 'automation';
+    automation_id: string;
+    action_id: string;
+    event_id: string;
+    attempt: number;
+  };
+  data: {
+    object: 'page';
+    id: string;
+    created_time: string;
+    last_edited_time: string;
+    parent: {
+      type: 'database_id';
+      database_id: string;
+    };
+    properties: Record<string, any>;
+    url: string;
+    request_id: string;
+  };
+}
+
+function formatDate(dateString: string): string {
+	const date = new Date(dateString);
+	const month = date.toLocaleString('default', { month: 'short', timeZone: 'UTC' });
+	const day = date.getUTCDate().toString().padStart(2, '0');
+	const year = date.getUTCFullYear();
+	return `${month} ${day} ${year}`;
+}
+
+function formatDateForFolder(dateString: string): string {
+	return new Date(dateString).toISOString().split('T')[0];
+}
+
+type NotionClient = InstanceType<typeof Client>;
+type UpdateBlockParameters = Parameters<NotionClient['blocks']['update']>[0];
+
+function isTextRichTextItem(item: RichTextItemResponse): item is TextRichTextItemResponse {
+	return item.type === 'text';
+}
+
+function isParagraphBlock(block: BlockObjectResponse | PartialBlockObjectResponse): block is BlockObjectResponse & { type: 'paragraph' } {
+	return 'type' in block && block.type === 'paragraph';
+}
+
+import { Client } from '@notionhq/client';
+
+async function processPage(page: PageObjectResponse, env: Env) {
+  const notion = new Client({ auth: env.NOTION_TOKEN });
+  const n2m = new NotionToMarkdown({ notionClient: notion });
+
+  const mdblocks = await n2m.pageToMarkdown(page.id);
+
+  // Extract page properties
+  const title = page.properties.Title.type === 'title' && page.properties.Title.title.length > 1
+    ? page.properties.Title.title.map((t) => t.plain_text.trim()).join(' ')
+    : page.properties.Title.type === 'title'
+      ? page.properties.Title.title[0]?.plain_text.trim()
+      : 'Untitled';
+
+  const slug = page.properties.Slug.type === 'formula' && page.properties.Slug?.formula?.type == 'string'
+    ? (page.properties.Slug.formula?.string as string)
+    : '';
+
+  const description = page.properties.Description.type === 'rich_text'
+    ? page.properties.Description.rich_text[0]?.plain_text.trim()
+    : '';
+
+  // Process images in the markdown blocks
+  for (let i = 0; i < mdblocks.length; i++) {
+    const block = mdblocks[i];
+    if (block.type === 'image') {
+      const imageUrl = block.parent.match(/\((.*?)\)/)?.[1];
+      if (imageUrl) {
+        try {
+          const blockId = block.blockId || `fallback-${i}`;
+          const imageKey = `${slug}-${blockId}${new URL(imageUrl).pathname.split('.').pop()}`;
+          const { signedUrl } = await uploadImage(imageUrl, slug, blockId, env);
+          const blockObj = await notion.blocks.retrieve({ block_id: blockId }) as ImageBlockObjectResponse;
+          const caption = blockObj.image?.caption[0]?.plain_text || '';
+          mdblocks[i].parent = `<R2Image imageKey="assets/${imageKey}" alt="${caption}" />`;
+        } catch (error) {
+          console.error(`Failed to upload image: ${imageUrl}`, error);
+        }
+      }
+    }
+  }
+
+  const mdString = n2m.toMarkdownString(mdblocks);
+  const convertedMdString = mdString.parent.replace(/\[(embed|video)\]\((https?:\/\/\S+)\)/g, '$2');
+
+  // Get dates
+  const pubDate = page.properties.Date?.type === 'date' && page.properties.Date.date?.start
+    ? formatDate(page.properties.Date.date.start)
+    : formatDate(page.created_time);
+
+  const updatedDate = formatDate(page.last_edited_time);
+
+  // Get tags
+  const tags = page.properties.Tags?.type === 'multi_select'
+    ? page.properties.Tags.multi_select.map((tag) => tag.name)
+    : [];
+
+  // Get folder date
+  const folderDate = page.properties.Date?.type === 'date' && page.properties.Date.date?.start
+    ? formatDateForFolder(page.properties.Date.date.start)
+    : formatDateForFolder(page.created_time);
+
+  const postContainsImages = mdblocks.some((block) => block.parent.includes('R2Image'));
+
+  const content = `---
+title: "${title}"
+seoTitle: "${title}"
+slug: "${slug}"
+description: "${description}"
+pubDate: '${pubDate}'
+updatedDate: '${updatedDate}'
+tags: ${JSON.stringify(tags)}
+coverImage: "./image.webp"
+---
+
+${postContainsImages ? `import R2Image from 'src/components/R2Image.astro';` : ''}
+
+${convertedMdString.replace(/\n\n/g, '\n')}`;
+
+  return {
+    content,
+    path: `src/content/blog/${folderDate}-${slug}/index.mdx`
+  };
+}
+
+async function uploadImage(imageUrl: string, pageSlug: string, blockId: string): Promise<{ uploaded: boolean; signedUrl: string }> {
+	try {
+		const S3 = new S3Client({
+			region: 'auto',
+			endpoint: `https://${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+			credentials: {
+				accessKeyId: env.CLOUDFLARE_R2_ACCESS_KEY_ID!,
+				secretAccessKey: env.CLOUDFLARE_R2_SECRET_ACCESS_KEY!,
+			},
+		});
+
+		// Generate a unique filename using blockId
+		const filename = `${pageSlug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
+		const key = `assets/${filename}`;
+
+		// Check if the file already exists in the bucket
+		try {
+			const headCommand = new HeadObjectCommand({
+				Bucket: env.R2_BUCKET_NAME!,
+				Key: key,
+			});
+			await S3.send(headCommand);
+
+			// If we reach here, the file exists. Generate and return a signed URL.
+			console.log('Image already exists in the bucket. Generating signed URL.');
+			const signedUrl = await getSignedUrlForObject(key);
+			return { uploaded: false, signedUrl };
+		} catch (error) {
+			// If the file doesn't exist, we'll get an error. Proceed with upload.
+			console.log('Image does not exist in the bucket. Proceeding with upload.');
+		}
+
+		// Download the image
+		const response = await fetch(imageUrl, {
+			headers: {
+				Accept: 'image/*',
+			},
+		});
+		if (!response.ok) {
+			throw new Error(`HTTP error! status: ${response.status}`);
+		}
+		const buffer = await response.arrayBuffer();
+
+		// Upload to R2
+		const uploadCommand = new PutObjectCommand({
+			Bucket: env.R2_BUCKET_NAME!,
+			Key: key,
+			Body: Buffer.from(buffer),
+			ContentType: response.headers.get('content-type') || 'image/png',
+		});
+
+		const result = await S3.send(uploadCommand);
+
+		if (result.$metadata.httpStatusCode !== 200) {
+			throw new Error(`Upload failed with status code: ${result.$metadata.httpStatusCode}`);
+		}
+
+		// Generate a signed URL
+		const signedUrl = await getSignedUrlForObject(key);
+
+		console.log('Upload successful. Signed URL:', signedUrl);
+		return { uploaded: true, signedUrl };
+	} catch (error) {
+		console.error('Error uploading image to R2:', error);
+		if (error instanceof Error) {
+			console.error('Error message:', error.message);
+			console.error('Error stack:', error.stack);
+		}
+		throw error;
+	}
+}
+
+async function getSignedUrlForObject(key: string): Promise<string> {
+	const getObjectCommand = new GetObjectCommand({
+		Bucket: env.R2_BUCKET_NAME!,
+		Key: key,
+	});
+
+	return getSignedUrl(S3, getObjectCommand, { expiresIn: 3600 }); // URL expires in 1 hour
+}
+
+interface NotionWebhookPayload {
+  source: {
+    type: 'automation';
+    automation_id: string;
+    action_id: string;
+    event_id: string;
+    attempt: number;
+  };
+  data: {
+    object: 'page';
+    id: string;
+    created_time: string;
+    last_edited_time: string;
+    parent: {
+      type: 'database_id';
+      database_id: string;
+    };
+    properties: Record<string, any>;
+    url: string;
+    request_id: string;
+  };
+}
+
+// Type guard to check if a message is a Notion webhook payload
+function isNotionWebhookPayload(payload: any): payload is NotionWebhookPayload {
+  return payload
+    && 'data' in payload
+    && 'id' in payload.data
+    && 'parent' in payload.data
+    && 'database_id' in payload.data.parent;
+}
+
+// Type guard for R2 event
+function isR2Event(payload: any): payload is R2EventMessage {
+  return payload && 'action' in payload && 'object' in payload;
+}
+
+// Helper function to process Notion webhooks
+async function processNotionWebhook(payload: NotionWebhookPayload, env: Env) {
+  const pageId = payload.data.id;
+  const databaseId = payload.data.parent.database_id;
+
+  if (databaseId !== env.NOTION_DATABASE_ID) {
+    console.log('Ignoring webhook - not from target database');
+    return;
+  }
+
+  const notion = new Client({ auth: env.NOTION_TOKEN });
+  const page = await notion.pages.retrieve({ page_id: pageId });
+
+  const { content, path } = await processPage(page as PageObjectResponse, env);
+
+  await commitToGitHub(
+    path,
+    content,
+    `chore: update ${path.split('/').pop()?.split('.')[0]} from Notion`,
+    env
+  );
+
+  console.log('Successfully processed Notion webhook for page:', pageId);
+}
+
+// Helper function to process R2 events
+async function processR2Event(event: R2EventMessage, env: Env) {
+  console.log('Processing R2 event:', {
+    action: event.action,
+    sourceKey: event.copySource?.object,
+    destinationKey: event.object.key,
+    size: event.object.size,
+    eTag: event.object.eTag
+  });
+
+  const pathParts = event.object.key.split('/');
+  if (pathParts.length >= 2) {
+    const dateSlugPart = pathParts[1];
+    const r2Object = await env.PORTFOLIO_BUCKET.get(event.object.key);
+
+    if (r2Object === null) {
+      throw new Error(`Object not found in R2: ${event.object.key}`);
+    }
+
+    const arrayBuffer = await r2Object.arrayBuffer();
+    const base64Content = Buffer.from(arrayBuffer).toString('base64');
+    const imagePath = `src/content/blog/${dateSlugPart}/image.webp`;
+
+    await commitToGitHub(
+      imagePath,
+      base64Content,
+      `chore: update cover image for ${dateSlugPart}`,
+      env
+    );
+
+    console.log('Successfully processed image:', {
+      r2Path: event.object.key,
+      gitPath: imagePath,
+      size: event.object.size
+    });
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -484,72 +803,55 @@ export default {
         return handleGitHubDispatch(request, env);
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
+			case '/webhooks/notion':
+				// Queue the Notion webhook payload
+				const payload = await request.json() as NotionWebhookPayload;
+				await env.NOTION_QUEUE.send(payload);
+				return new Response(JSON.stringify({
+					status: 'accepted',
+					message: 'Webhook received and queued for processing'
+				}), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				});
       default:
         return new Response('Not Found', { status: 404 });
     }
   },
 	async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
-    // Process each message in the batch
     for (const message of batch.messages) {
       try {
-				const event = message.body;
+        const payload = message.body;
 
-				if (event.action === 'CopyObject' && event.object.key.endsWith('image.webp')) {
-					console.log('Processing R2 event:', {
-						action: event.action,
-						sourceKey: event.copySource?.object,
-						destinationKey: event.object.key,
-						size: event.object.size,
-						eTag: event.object.eTag
-					});
+        // Handle Notion webhook messages
+        if (isNotionWebhookPayload(payload)) {
+          await processNotionWebhook(payload, env);
+          message.ack();
+          continue;
+        }
 
-					const pathParts = event.object.key.split('/');
-					if (pathParts.length >= 2) {
-						const dateSlugPart = pathParts[1];
+        // Handle R2 events
+        if (isR2Event(payload) && payload.action === 'CopyObject' && payload.object.key.endsWith('image.webp')) {
+          await processR2Event(payload, env);
+          message.ack();
+          continue;
+        }
 
-						// Get the image from R2
-						const r2Object = await env.PORTFOLIO_BUCKET.get(event.object.key);
+        // Unknown message type
+        console.warn('Unknown message type received:', payload);
+        message.ack();
 
-						if (r2Object === null) {
-							throw new Error(`Object not found in R2: ${event.object.key}`);
-						}
-
-						// Convert the R2 object to base64
-						const arrayBuffer = await r2Object.arrayBuffer();
-						const base64Content = Buffer.from(arrayBuffer).toString('base64');
-
-						// Prepare the file path in the GitHub repo
-						const imagePath = `src/content/blog/${dateSlugPart}/image.webp`;
-
-						// Commit to GitHub
-						await commitToGitHub(
-							imagePath,
-							base64Content,
-							`chore: update cover image for ${dateSlugPart}`,
-							env
-						);
-
-						console.log('Successfully processed image:', {
-							r2Path: event.object.key,
-							gitPath: imagePath,
-							size: event.object.size
-						});
-					}
-				}
-
-				message.ack();
-			} catch (error) {
-				console.error('Error processing message:', error);
-
-				if (message.attempts < 3) {
-					message.retry({
-						delaySeconds: Math.pow(2, message.attempts) // 2s, 4s, 8s
-					});
-				} else {
-					console.error(`Failed to process message after ${message.attempts} attempts:`, message.body);
-					message.ack();
-				}
-			}
+      } catch (error) {
+        console.error('Error processing message:', error);
+        if (message.attempts < 3) {
+          message.retry({
+            delaySeconds: Math.pow(2, message.attempts) // 2s, 4s, 8s
+          });
+        } else {
+          console.error(`Failed to process message after ${message.attempts} attempts:`, message.body);
+          message.ack();
+        }
+      }
     }
   }
 } satisfies ExportedHandler<Env>;

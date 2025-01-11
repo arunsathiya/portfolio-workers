@@ -9,11 +9,13 @@ routes = [
     { pattern = "arun.blog/api/generate-image", zone_name = "arun.blog" },
     { pattern = "arun.blog/api/trigger-github-workflow", zone_name = "arun.blog" },
     { pattern = "arun.blog/webhooks/replicate*", zone_name = "arun.blog" },
+    { pattern = "arun.blog/webhooks/notion", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/assets/*", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/api/dispatch", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/api/generate-image", zone_name = "arun.blog" },
 	{ pattern = "www.arun.blog/api/trigger-github-workflow", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/webhooks/replicate*", zone_name = "arun.blog" },
+    { pattern = "www.arun.blog/webhooks/notion", zone_name = "arun.blog" },
 ]
 
 # Automatically place your workloads in an optimal location to minimize latency.
@@ -92,14 +94,19 @@ id = "b1c34589814240cfa24050edb1dd028d"
 
 # Bind a Queue producer. Use this binding to schedule an arbitrary task that may be processed later by a Queue consumer.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#queues
-# [[queues.producers]]
-# binding = "MY_QUEUE"
-# queue = "my-queue"
+[[queues.producers]]
+binding = "NOTION_QUEUE"
+queue = "notion-updates"
 
 # Bind a Queue consumer. Queue Consumers can retrieve tasks scheduled by Producers to act on them.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#queues
 [[queues.consumers]]
 queue = "cover-image-update"
+max_batch_size = 10
+max_batch_timeout = 30
+
+[[queues.consumers]]
+queue = "notion-updates"
 max_batch_size = 10
 max_batch_timeout = 30
 
