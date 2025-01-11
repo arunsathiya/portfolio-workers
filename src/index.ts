@@ -383,13 +383,50 @@ interface MessageBatch<Body = unknown> {
   retryAll(options?: QueueRetryOptions): void;
 }
 
-async function commitToGitHub(
+const getFileContent = async (path: string, env: Env): Promise<string | null> => {
+  const query = `
+    query GetFileContent {
+      repository(owner: "arunsathiya", name: "portfolio") {
+        object(expression: "main:${path}") {
+          ... on Blob {
+            text
+          }
+        }
+      }
+    }
+  `;
+
+  const response = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.GITHUB_PAT}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Cloudflare-Worker'
+    },
+    body: JSON.stringify({ query })
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub API error: ${await response.text()}`);
+  }
+
+  const result = await response.json();
+  return result.data.repository.object?.text ?? null;
+}
+
+const commitToGitHub = async (
   filePath: string,
   content: string,
   message: string,
   env: Env
-): Promise<void> {
-  const query = `
+): Promise<boolean> => {
+	const currentContent = await getFileContent(filePath, env);
+	if (currentContent === content) {
+		console.log(`No changes detected for ${filePath}, skipping commit`)
+		return false;
+	}
+
+	const query = `
     mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) {
       createCommitOnBranch(input: $input) {
         commit {
@@ -440,9 +477,10 @@ async function commitToGitHub(
   if (result.errors) {
     throw new Error(`GraphQL Error: ${JSON.stringify(result.errors)}`);
   }
+	return true;
 }
 
-async function getLatestCommitOid(env: Env): Promise<string> {
+const getLatestCommitOid = async (env: Env): Promise<string> => {
   const query = `
     query GetLatestCommit {
       repository(owner: "arunsathiya", name: "portfolio") {
