@@ -414,17 +414,34 @@ const getFileContent = async (path: string, env: Env): Promise<string | null> =>
   return result.data.repository.object?.text ?? null;
 }
 
+interface FileChange {
+  path: string;
+  content: string;
+}
+
 const commitToGitHub = async (
-  filePath: string,
-  content: string,
+  files: FileChange[],
   message: string,
   env: Env
 ): Promise<boolean> => {
-	const currentContent = await getFileContent(filePath, env);
-	if (currentContent === content) {
-		console.log(`No changes detected for ${filePath}, skipping commit`)
-		return false;
-	}
+	let hasChanges = false
+	const additions = [];
+
+	for (const file of files) {
+    const currentContent = await getFileContent(file.path, env);
+    if (currentContent !== file.content) {
+      hasChanges = true;
+      additions.push({
+        path: file.path,
+        contents: Buffer.from(file.content).toString('base64')
+      });
+    }
+  }
+
+	if (!hasChanges) {
+    console.log('No changes detected in any files, skipping commit');
+    return false;
+  }
 
 	const query = `
     mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) {
@@ -447,10 +464,7 @@ const commitToGitHub = async (
         body: `Commit created by github-actions[bot]\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`
       },
       fileChanges: {
-        additions: [{
-          path: filePath,
-          contents: Buffer.from(content).toString('base64')
-        }]
+        additions
       },
       expectedHeadOid: await getLatestCommitOid(env)
     }
@@ -752,8 +766,10 @@ const processNotionWebhook = async (payload: NotionWebhookPayload, env: Env) => 
   const { content, path } = await processPage(pageId, env, s3);
 
   await commitToGitHub(
-    path,
-    content,
+    [{
+			path,
+			content,
+		}],
     `chore: update ${path}`,
     env
   );
@@ -781,19 +797,21 @@ async function processR2Event(event: R2EventMessage, env: Env) {
     }
 
     const arrayBuffer = await r2Object.arrayBuffer();
-    const base64Content = Buffer.from(arrayBuffer).toString('base64');
-    const imagePath = `src/content/blog/${dateSlugPart}/image.webp`;
+    const content = Buffer.from(arrayBuffer).toString('base64');
+    const path = `src/content/blog/${dateSlugPart}/image.webp`;
 
     await commitToGitHub(
-      imagePath,
-      base64Content,
+      [{
+				path,
+				content,
+			}],
       `chore: update cover image for ${dateSlugPart}`,
       env
     );
 
     console.log('Successfully processed image:', {
       r2Path: event.object.key,
-      gitPath: imagePath,
+      gitPath: path,
       size: event.object.size
     });
   }
