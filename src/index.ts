@@ -515,13 +515,17 @@ function isParagraphBlock(block: BlockObjectResponse | PartialBlockObjectRespons
 	return 'type' in block && block.type === 'paragraph';
 }
 
-import { Client } from '@notionhq/client';
+const processPage = async (pageId: string, env: Env) => {
+  const notion = new Client({ auth: env.NOTION_TOKEN, notionVersion: '2022-06-28', fetch: (input, init) => fetch(input, init) });
+  const n2m = new NotionToMarkdown({ notionClient: notion,
+		config: {
+			parseChildPages: false,
+			separateChildPage: false,
+		}
+	 });
 
-async function processPage(page: PageObjectResponse, env: Env) {
-  const notion = new Client({ auth: env.NOTION_TOKEN });
-  const n2m = new NotionToMarkdown({ notionClient: notion });
-
-  const mdblocks = await n2m.pageToMarkdown(page.id);
+  const mdblocks = await n2m.pageToMarkdown(pageId);
+	const page = await notion.pages.retrieve({ page_id: pageId }) as PageObjectResponse
 
   // Extract page properties
   const title = page.properties.Title.type === 'title' && page.properties.Title.title.length > 1
@@ -720,7 +724,7 @@ function isR2Event(payload: any): payload is R2EventMessage {
 }
 
 // Helper function to process Notion webhooks
-async function processNotionWebhook(payload: NotionWebhookPayload, env: Env) {
+const processNotionWebhook = async (payload: NotionWebhookPayload, env: Env) => {
   const pageId = payload.data.id;
   const databaseId = payload.data.parent.database_id;
 
@@ -729,10 +733,7 @@ async function processNotionWebhook(payload: NotionWebhookPayload, env: Env) {
     return;
   }
 
-  const notion = new Client({ auth: env.NOTION_TOKEN });
-  const page = await notion.pages.retrieve({ page_id: pageId });
-
-  const { content, path } = await processPage(page as PageObjectResponse, env);
+  const { content, path } = await processPage(pageId, env);
 
   await commitToGitHub(
     path,
