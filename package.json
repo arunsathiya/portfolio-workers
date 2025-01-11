@@ -21,6 +21,9 @@
     "@anthropic-ai/sdk": "^0.29.0",
     "@aws-sdk/client-s3": "^3.670.0",
     "@aws-sdk/s3-request-presigner": "^3.670.0",
+    "@notionhq/client": "^2.2.15",
+    "notion-to-md": "^3.1.4",
+    "path": "^0.12.7",
     "replicate": "^1.0.1"
   },
   "packageManager": "yarn@4.6.0"
