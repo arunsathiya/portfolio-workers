@@ -399,7 +399,8 @@ async function commitToGitHub(
         branchName: 'main'
       },
       message: {
-        headline: message
+        headline: message,
+        body: `Commit created by github-actions[bot]\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`
       },
       fileChanges: {
         additions: [{
