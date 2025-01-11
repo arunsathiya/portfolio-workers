@@ -26,6 +26,7 @@ interface Env {
   GITHUB_PAT: string;
   DISPATCH_SECRET: string;
 	NOTION_QUEUE: Queue<NotionWebhookPayload>;
+	NOTION_SIGNATURE_SECRET: string;
 }
 
 interface CachedSignedUrl {
@@ -804,7 +805,10 @@ export default {
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
 			case '/webhooks/notion':
-				// Queue the Notion webhook payload
+				const notionSignature = request.headers.get('X-Notion-Signature');
+				if (!notionSignature || notionSignature !== `Bearer ${env.NOTION_SIGNATURE_SECRET}`) {
+					return new Response('Unauthorized', { status: 401 });
+				}
 				const payload = await request.json() as NotionWebhookPayload;
 				await env.NOTION_QUEUE.send(payload);
 				return new Response(JSON.stringify({
