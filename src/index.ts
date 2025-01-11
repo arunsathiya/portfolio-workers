@@ -552,8 +552,8 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
 					const blockId = block.blockId || `fallback-${i}`;
 					const blockObj = await notion.blocks.retrieve({ block_id: blockId }) as ImageBlockObjectResponse;
 					const caption = blockObj.image?.caption[0]?.plain_text || '';
-					const { imageKey } = await uploadImage(imageUrl, slug, blockId, env, s3)
-					mdblocks[i].parent = `<R2Image imageKey="assets/${imageKey}" alt="${caption}" />`;
+					const { key } = await uploadImage(imageUrl, slug, blockId, env, s3)
+					mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${caption}" />`;
 				} catch (error) {
           console.error(`Failed to upload image: ${imageUrl}`, error);
         }
@@ -604,7 +604,7 @@ ${convertedMdString.replace(/\n\n/g, '\n')}`;
   };
 }
 
-const uploadImage = async (imageUrl: string, pageSlug: string, blockId: string, env: Env, s3: S3Client): Promise<{ uploaded: boolean; imageKey: string }> => {
+const uploadImage = async (imageUrl: string, pageSlug: string, blockId: string, env: Env, s3: S3Client): Promise<{ uploaded: boolean; key: string }> => {
 	try {
 		// Generate a unique filename using blockId
 		const filename = `${pageSlug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
@@ -618,9 +618,9 @@ const uploadImage = async (imageUrl: string, pageSlug: string, blockId: string, 
 			});
 			await s3.send(headCommand);
 
-			// If we reach here, the file exists. Generate and return a signed URL.
+			// If we reach here, the file exists.
 			console.log('Image already exists in the bucket.');
-			return { uploaded: false, imageKey: key };
+			return { uploaded: false, key };
 		} catch (error) {
 			// If the file doesn't exist, we'll get an error. Proceed with upload.
 			console.log('Image does not exist in the bucket. Proceeding with upload.');
@@ -652,7 +652,7 @@ const uploadImage = async (imageUrl: string, pageSlug: string, blockId: string, 
 		}
 
 		console.log('Upload successful. Key:', key);
-		return { uploaded: true, imageKey: key };
+		return { uploaded: true, key };
 	} catch (error) {
 		console.error('Error uploading image to R2:', error);
 		if (error instanceof Error) {
