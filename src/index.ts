@@ -412,7 +412,7 @@ async function commitToGitHub(
       fileChanges: {
         additions: [{
           path: filePath,
-          contents: content
+          contents: Buffer.from(content).toString('base64')
         }]
       },
       expectedHeadOid: await getLatestCommitOid(env)
