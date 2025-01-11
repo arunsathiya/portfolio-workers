@@ -314,90 +314,6 @@ const handleImageGeneration = async (request: Request, env: Env) => {
   }
 };
 
-const handleGitHubWorkflow = async (request: Request, env: Env) => {
-  const authToken = request.headers.get('Authorization');
-  if (!authToken || authToken !== `Bearer ${env.IMAGE_GENERATION_SECRET}`) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-
-  try {
-    // Fetch latest from Notion
-    const notionResponse = await fetch(
-      'https://api.notion.com/v1/databases/8d627174-9239-4deb-ab4b-ea9262e3c066/query',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${env.NOTION_TOKEN}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ page_size: 100 })
-      }
-    );
-
-    if (!notionResponse.ok) {
-      throw new Error(`Notion API error: ${notionResponse.statusText}`);
-    }
-
-    const notionData: NotionResponse = await notionResponse.json();
-    const latestPage = notionData.results
-      .sort((a, b) => b.last_edited_time.localeCompare(a.last_edited_time))[0];
-
-    // Extract fields
-    const date = latestPage.properties["Date frontmatter"].formula.string;
-    const slug = latestPage.properties["Slug frontmatter"].formula.string;
-    const titleElements = latestPage.properties.Title.title.map(t => t.plain_text.trim());
-    const title = titleElements.length > 0 ? titleElements.join('') : 'Untitled';
-
-    // Trigger GitHub workflow
-    const workflowDispatch: GitHubWorkflowDispatch = {
-      ref: 'main',
-      inputs: {
-        commit_message: title,
-        date_slug_combo: `${date}-${slug}`,
-      }
-    };
-
-    const githubResponse = await fetch(
-      `https://api.github.com/repos/arunsathiya/portfolio/actions/workflows/cover-image.yml/dispatches`,
-      {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/vnd.github+json',
-          'Authorization': `Bearer ${env.GITHUB_PAT}`,
-          'X-GitHub-Api-Version': '2022-11-28',
-          'Content-Type': 'application/json',
-          'User-Agent': 'Cloudflare-Worker'
-        },
-        body: JSON.stringify(workflowDispatch)
-      }
-    );
-
-    if (!githubResponse.ok) {
-      throw new Error(`GitHub API error: ${githubResponse.statusText}`);
-    }
-
-    return new Response(JSON.stringify({
-      date_slug_combo: `${date}-${slug}`,
-      title,
-      status: 'GitHub workflow triggered'
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-
-  } catch (error) {
-    console.error('Error:', error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error occurred' }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-  }
-};
-
 const handleReplicateWebhook = async (request: Request, env: Env) => {
   const rawBody = await request.text();
   const valid = await validateWebhook(new Request(request.url, {
@@ -560,11 +476,6 @@ export default {
           return new Response('Method not allowed', { status: 405 });
         }
         return handleImageGeneration(request, env);
-      case '/api/trigger-github-workflow':
-        if (request.method !== 'POST') {
-          return new Response('Method not allowed', { status: 405 });
-        }
-        return handleGitHubWorkflow(request, env);
       case '/api/dispatch':
         if (request.method !== 'POST') {
           return new Response('Method not allowed', { status: 405 });
