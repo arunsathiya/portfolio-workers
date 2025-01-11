@@ -428,6 +428,123 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
   return new Response('OK', { status: 200 });
 };
 
+interface R2EventMessage {
+  account: string;
+  bucket: string;
+  eventTime: string;
+  action: 'PutObject' | 'DeleteObject' | 'CopyObject';
+  object: {
+    key: string;
+    size: number;
+    eTag: string;
+  };
+  copySource?: {
+    bucket: string;
+    object: string;
+  };
+}
+
+interface Message<Body = unknown> {
+  readonly id: string;
+  readonly timestamp: Date;
+  readonly body: Body;
+  readonly attempts: number;
+  ack(): void;
+  retry(options?: QueueRetryOptions): void;
+}
+
+interface MessageBatch<Body = unknown> {
+  readonly queue: string;
+  readonly messages: Message<Body>[];
+  ackAll(): void;
+  retryAll(options?: QueueRetryOptions): void;
+}
+
+async function commitToGitHub(
+  filePath: string,
+  content: string,
+  message: string,
+  env: Env
+): Promise<void> {
+  const query = `
+    mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) {
+      createCommitOnBranch(input: $input) {
+        commit {
+          url
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    input: {
+      branch: {
+        repositoryNameWithOwner: 'arunsathiya/portfolio',
+        branchName: 'main'
+      },
+      message: {
+        headline: message
+      },
+      fileChanges: {
+        additions: [{
+          path: filePath,
+          contents: content
+        }]
+      },
+      expectedHeadOid: await getLatestCommitOid(env)
+    }
+  };
+
+  const response = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.GITHUB_PAT}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Cloudflare-Worker'
+    },
+    body: JSON.stringify({
+      query,
+      variables
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub API error: ${await response.text()}`);
+  }
+
+  const result = await response.json();
+  if (result.errors) {
+    throw new Error(`GraphQL Error: ${JSON.stringify(result.errors)}`);
+  }
+}
+
+async function getLatestCommitOid(env: Env): Promise<string> {
+  const query = `
+    query GetLatestCommit {
+      repository(owner: "arunsathiya", name: "portfolio") {
+        defaultBranchRef {
+          target {
+            oid
+          }
+        }
+      }
+    }
+  `;
+
+  const response = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.GITHUB_PAT}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Cloudflare-Worker'
+    },
+    body: JSON.stringify({ query })
+  });
+
+  const result = await response.json();
+  return result.data.repository.defaultBranchRef.target.oid;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -459,4 +576,68 @@ export default {
         return new Response('Not Found', { status: 404 });
     }
   },
+	async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Process each message in the batch
+    for (const message of batch.messages) {
+      try {
+				const event = message.body;
+
+				if (event.action === 'CopyObject' && event.object.key.endsWith('image.webp')) {
+					console.log('Processing R2 event:', {
+						action: event.action,
+						sourceKey: event.copySource?.object,
+						destinationKey: event.object.key,
+						size: event.object.size,
+						eTag: event.object.eTag
+					});
+
+					const pathParts = event.object.key.split('/');
+					if (pathParts.length >= 2) {
+						const dateSlugPart = pathParts[1];
+
+						// Get the image from R2
+						const r2Object = await env.PORTFOLIO_BUCKET.get(event.object.key);
+
+						if (r2Object === null) {
+							throw new Error(`Object not found in R2: ${event.object.key}`);
+						}
+
+						// Convert the R2 object to base64
+						const arrayBuffer = await r2Object.arrayBuffer();
+						const base64Content = Buffer.from(arrayBuffer).toString('base64');
+
+						// Prepare the file path in the GitHub repo
+						const imagePath = `src/content/blog/${dateSlugPart}/image.webp`;
+
+						// Commit to GitHub
+						await commitToGitHub(
+							imagePath,
+							base64Content,
+							`chore: update cover image for ${dateSlugPart}`,
+							env
+						);
+
+						console.log('Successfully processed image:', {
+							r2Path: event.object.key,
+							gitPath: imagePath,
+							size: event.object.size
+						});
+					}
+				}
+
+				message.ack();
+			} catch (error) {
+				console.error('Error processing message:', error);
+
+				if (message.attempts < 3) {
+					message.retry({
+						delaySeconds: Math.pow(2, message.attempts) // 2s, 4s, 8s
+					});
+				} else {
+					console.error(`Failed to process message after ${message.attempts} attempts:`, message.body);
+					message.ack();
+				}
+			}
+    }
+  }
 } satisfies ExportedHandler<Env>;

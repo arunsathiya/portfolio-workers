@@ -858,10 +858,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/workers-types@npm:^4.20241011.0":
-  version: 4.20241011.0
-  resolution: "@cloudflare/workers-types@npm:4.20241011.0"
-  checksum: 10c0/f5a414e82a0a80885ab25f01e7f608e5e9a8be587c5d57ae976c3356adfa2fff9babe3c33201cf94e71d3afd54732b09885376c3caf13c75d5d23772850fece6
+"@cloudflare/workers-types@npm:^4.20250109.0":
+  version: 4.20250109.0
+  resolution: "@cloudflare/workers-types@npm:4.20250109.0"
+  checksum: 10c0/945de6ea746893d689be063c9d603d9c5e0956e997337f29f0dedfd7355628b9603e08cf5d530fb868de5109ecee523db9ab8b21b743e3c31f462d62338cdf39
   languageName: node
   linkType: hard
 
@@ -3530,7 +3530,7 @@ __metadata:
     "@aws-sdk/client-s3": "npm:^3.670.0"
     "@aws-sdk/s3-request-presigner": "npm:^3.670.0"
     "@cloudflare/vitest-pool-workers": "npm:^0.5.18"
-    "@cloudflare/workers-types": "npm:^4.20241011.0"
+    "@cloudflare/workers-types": "npm:^4.20250109.0"
     "@vitest/runner": "npm:^2.1.8"
     "@vitest/snapshot": "npm:^2.1.8"
     replicate: "npm:^1.0.1"
