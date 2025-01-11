@@ -753,8 +753,9 @@ function isR2Event(payload: any): payload is R2EventMessage {
 }
 
 // Helper function to process Notion webhooks
-const processNotionWebhook = async (payload: NotionWebhookPayload, env: Env) => {
+const processNotionWebhook = async (payload: NotionWebhookPayload, request: Request, env: Env) => {
 	const s3 = createS3Client(env)
+	const processAllHeader = request.headers.get('X-Process-All-Pages');
   const pageId = payload.data.id;
   const databaseId = payload.data.parent.database_id;
 
@@ -763,16 +764,43 @@ const processNotionWebhook = async (payload: NotionWebhookPayload, env: Env) => 
     return;
   }
 
-  const { content, path } = await processPage(pageId, env, s3);
+	if (processAllHeader) {
+    console.log('Processing all pages in database:', databaseId);
+    const notion = new Client({ auth: env.NOTION_TOKEN, notionVersion: '2022-06-28', fetch: (input, init) => fetch(input, init) });
+		const pages = await notion.databases.query({
+			database_id: databaseId,
+		})
+		const headers = Object.fromEntries(request.headers.entries());
+    delete headers['x-process-all-pages'];
+		for (const page of pages.results) {
+      await env.NOTION_QUEUE.send({
+        type: 'notion',
+        payload: {
+          data: {
+            id: page.id,
+            parent: {
+              database_id: databaseId
+            }
+          }
+        },
+        headers
+      });
+      console.log('Queued page for processing:', page.id);
+    }
+		console.log('Successfully queued all database pages for processing');
+  } else {
+    const { content, path } = await processPage(pageId, env, s3);
+		await commitToGitHub(
+			[{
+				path,
+				content,
+			}],
+			`chore: update ${path}`,
+			env
+		);
+  }
 
-  await commitToGitHub(
-    [{
-			path,
-			content,
-		}],
-    `chore: update ${path}`,
-    env
-  );
+
 
   console.log('Successfully processed Notion webhook for page:', pageId);
 }
@@ -845,7 +873,11 @@ export default {
 					return new Response('Unauthorized', { status: 401 });
 				}
 				const payload = await request.json() as NotionWebhookPayload;
-				await env.NOTION_QUEUE.send(payload);
+				await env.NOTION_QUEUE.send({
+					type: 'notion',
+					payload,
+					headers: Object.fromEntries(request.headers.entries())
+				});
 				return new Response(JSON.stringify({
 					status: 'accepted',
 					message: 'Webhook received and queued for processing'
@@ -860,11 +892,16 @@ export default {
 	async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
     for (const message of batch.messages) {
       try {
-        const payload = message.body;
+        const { type, payload, headers } = message.body;
 
         // Handle Notion webhook messages
-        if (isNotionWebhookPayload(payload)) {
-          await processNotionWebhook(payload, env);
+        if (type === 'notion' && isNotionWebhookPayload(payload)) {
+          // Reconstruct request object with headers
+          const request = new Request('https://dummy-url', {
+            headers: headers
+          });
+
+          await processNotionWebhook(payload, request, env);
           message.ack();
           continue;
         }
