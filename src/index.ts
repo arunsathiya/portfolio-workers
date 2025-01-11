@@ -428,6 +428,38 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
   return new Response('OK', { status: 200 });
 };
 
+interface R2EventMessage {
+  account: string;
+  bucket: string;
+  eventTime: string;
+  action: 'PutObject' | 'DeleteObject' | 'CopyObject';
+  object: {
+    key: string;
+    size: number;
+    eTag: string;
+  };
+  copySource?: {
+    bucket: string;
+    object: string;
+  };
+}
+
+interface Message<Body = unknown> {
+  readonly id: string;
+  readonly timestamp: Date;
+  readonly body: Body;
+  readonly attempts: number;
+  ack(): void;
+  retry(options?: QueueRetryOptions): void;
+}
+
+interface MessageBatch<Body = unknown> {
+  readonly queue: string;
+  readonly messages: Message<Body>[];
+  ackAll(): void;
+  retryAll(options?: QueueRetryOptions): void;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -459,4 +491,20 @@ export default {
         return new Response('Not Found', { status: 404 });
     }
   },
+	async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Process each message in the batch
+    for (const message of batch.messages) {
+      try {
+        // Type guard to ensure message body is the expected type
+        const body = message.body as { key: string, data: ArrayBuffer };
+        console.log(body)
+        message.ack();
+      } catch (error) {
+        console.error('Error processing message:', error);
+        message.retry({
+          delaySeconds: 60
+        });
+      }
+    }
+  }
 } satisfies ExportedHandler<Env>;
