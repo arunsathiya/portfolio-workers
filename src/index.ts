@@ -716,7 +716,7 @@ const processNotionWebhook = async (payload: NotionWebhookPayload, env: Env) => 
   await commitToGitHub(
     path,
     content,
-    `chore: update ${path.split('/').pop()?.split('.')[0]} from Notion`,
+    `chore: update ${path}`,
     env
   );
 
