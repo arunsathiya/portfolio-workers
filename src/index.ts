@@ -38,9 +38,9 @@ interface Env {
   NOTION_DATABASE_ID: string;
   GITHUB_PAT: string;
   DISPATCH_SECRET: string;
-	NOTION_QUEUE: Queue<NotionWebhookPayload>;
-	NOTION_SIGNATURE_SECRET: string;
-	IMAGE_UPLOAD_QUEUE: Queue<ImageUploadMessage>;
+  NOTION_QUEUE: Queue<NotionWebhookPayload>;
+  NOTION_SIGNATURE_SECRET: string;
+  IMAGE_UPLOAD_QUEUE: Queue<ImageUploadMessage>;
 }
 
 interface CachedSignedUrl {
@@ -452,12 +452,8 @@ interface FileChange {
   content: string;
 }
 
-const commitToGitHub = async (
-  files: FileChange[],
-  message: string,
-  env: Env
-): Promise<boolean> => {
-	const contentChecks = await Promise.all(
+const commitToGitHub = async (files: FileChange[], message: string, env: Env): Promise<boolean> => {
+  const contentChecks = await Promise.all(
     files.map(async (file) => {
       const currentContent = await getFileContent(file.path, env);
       return {
@@ -466,20 +462,20 @@ const commitToGitHub = async (
         hasChanged: currentContent !== file.content,
         addition: {
           path: file.path,
-          contents: Buffer.from(file.content).toString('base64')
-        }
+          contents: Buffer.from(file.content).toString('base64'),
+        },
       };
-    })
+    }),
   );
 
   const additions = contentChecks
-    .filter(check => check.hasChanged)
-    .map(check => check.addition);
+    .filter((check) => check.hasChanged)
+    .map((check) => check.addition);
 
-	if (additions.length === 0) {
-		console.log('No changes detected in any files, skipping commit');
-		return false;
-	}
+  if (additions.length === 0) {
+    console.log('No changes detected in any files, skipping commit');
+    return false;
+  }
 
   const query = `
     mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) {
@@ -628,9 +624,9 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
     },
   });
 
-	 const [mdblocks, page] = await Promise.all([
+  const [mdblocks, page] = await Promise.all([
     n2m.pageToMarkdown(pageId),
-    notion.pages.retrieve({ page_id: pageId }) as Promise<PageObjectResponse>
+    notion.pages.retrieve({ page_id: pageId }) as Promise<PageObjectResponse>,
   ]);
 
   // Extract page properties
@@ -658,17 +654,17 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       const imageUrl = block.parent.match(/\((.*?)\)/)?.[1];
       if (imageUrl) {
         try {
-					const blockId = block.blockId || `fallback-${i}`;
-					await env.IMAGE_UPLOAD_QUEUE.send({
-						imageUrl,
-						pageSlug: slug,
-						blockId,
-						notionPageId: pageId,
-					})
-					const filename = `${slug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
-					const key = `assets/${filename}`;
-					mdblocks[i].parent = `<R2Image imageKey="${key}" alt="/" />`;
-				} catch (error) {
+          const blockId = block.blockId || `fallback-${i}`;
+          await env.IMAGE_UPLOAD_QUEUE.send({
+            imageUrl,
+            pageSlug: slug,
+            blockId,
+            notionPageId: pageId,
+          });
+          const filename = `${slug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
+          const key = `assets/${filename}`;
+          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="/" />`;
+        } catch (error) {
           console.error(`Failed to queue image image: ${imageUrl}`, error);
         }
       }
@@ -874,14 +870,14 @@ const processNotionWebhook = async (
     for (let i = 0; i < pages.results.length; i += BATCH_SIZE) {
       const batch = pages.results.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.all(
-        batch.map(page =>
+        batch.map((page) =>
           processPage(page.id, env, s3)
-            .then(result => ({ path: result.path, content: result.content }))
-            .catch(error => {
+            .then((result) => ({ path: result.path, content: result.content }))
+            .catch((error) => {
               console.error(`Error processing page ${page.id}:`, error);
               return null;
-            })
-        )
+            }),
+        ),
       );
 
       fileChanges.push(...batchResults.filter((result): result is FileChange => result !== null));
@@ -1040,65 +1036,79 @@ export default {
           'x-notion-signature': notionSignature,
         };
         const processAllPages = request.headers.has('x-process-all-pages');
-				ctx.waitUntil(
+        ctx.waitUntil(
           processNotionWebhook(
             payload,
             {
               headers: relevantHeaders || {},
-              processAllPages: processAllPages || false
+              processAllPages: processAllPages || false,
             },
-            env
-          ).catch(error => {
+            env,
+          ).catch((error) => {
             console.error('Error processing Notion webhook:', error);
-          })
+          }),
         );
 
         // Immediately return response
-        return new Response(JSON.stringify({
-          status: 'accepted',
-          message: 'Webhook received and will be processed asynchronously'
-        }), {
-          status: 202, // Using 202 Accepted to indicate async processing
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new Response(
+          JSON.stringify({
+            status: 'accepted',
+            message: 'Webhook received and will be processed asynchronously',
+          }),
+          {
+            status: 202, // Using 202 Accepted to indicate async processing
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
       default:
         return new Response('Not Found', { status: 404 });
     }
   },
 
-  async queue(batch: MessageBatch<QueueMessageBody | ImageUploadMessage>, env: Env, ctx: ExecutionContext): Promise<void> {
+  async queue(
+    batch: MessageBatch<QueueMessageBody | ImageUploadMessage>,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     const s3 = createS3Client(env);
-		for (const message of batch.messages) {
+    for (const message of batch.messages) {
       try {
         if ('type' in message.body) {
-					const { type, payload, headers, processAllPages } = message.body;
+          const { type, payload, headers, processAllPages } = message.body;
 
-					// Handle R2 events
-					if (isR2Event(payload) && payload.action === 'CopyObject' && payload.object.key.endsWith('image.webp')) {
-						await processR2Event(payload, env);
-						message.ack();
-						continue;
-					}
+          // Handle R2 events
+          if (
+            isR2Event(payload) &&
+            payload.action === 'CopyObject' &&
+            payload.object.key.endsWith('image.webp')
+          ) {
+            await processR2Event(payload, env);
+            message.ack();
+            continue;
+          }
 
-					// Unknown message type
-					console.warn('Unknown message type received:', payload);
-					message.ack();
-				}
-				const { imageUrl, pageSlug, blockId } = message.body as ImageUploadMessage;
-				try {
-					await uploadImage(imageUrl, pageSlug, blockId, env, s3);
-					message.ack();
-				} catch (error) {
-					console.error('Error uploading image:', error);
-					if (message.attempts<3) {
-						message.retry({
-							delaySeconds: Math.pow(2, message.attempts) // 2s, 4s, 8s
-						});
-					} else {
-						console.error(`Failed to upload image after ${message.attempts} attempts:`, message.body);
-          	message.ack();
-					}
-				}
+          // Unknown message type
+          console.warn('Unknown message type received:', payload);
+          message.ack();
+        }
+        const { imageUrl, pageSlug, blockId } = message.body as ImageUploadMessage;
+        try {
+          await uploadImage(imageUrl, pageSlug, blockId, env, s3);
+          message.ack();
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          if (message.attempts < 3) {
+            message.retry({
+              delaySeconds: Math.pow(2, message.attempts), // 2s, 4s, 8s
+            });
+          } else {
+            console.error(
+              `Failed to upload image after ${message.attempts} attempts:`,
+              message.body,
+            );
+            message.ack();
+          }
+        }
       } catch (error) {
         console.error('Error processing message:', error);
         if (message.attempts < 3) {
