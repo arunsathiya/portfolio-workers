@@ -38,8 +38,14 @@ interface Env {
   NOTION_DATABASE_ID: string;
   GITHUB_PAT: string;
   DISPATCH_SECRET: string;
+<<<<<<< HEAD
   NOTION_QUEUE: Queue<NotionWebhookPayload>;
   NOTION_SIGNATURE_SECRET: string;
+=======
+	NOTION_QUEUE: Queue<NotionWebhookPayload>;
+	NOTION_SIGNATURE_SECRET: string;
+	IMAGE_UPLOAD_QUEUE: Queue<ImageUploadMessage>;
+>>>>>>> 54d8364 (Handle image uploads in a queue)
 }
 
 interface CachedSignedUrl {
@@ -597,6 +603,13 @@ function isParagraphBlock(
   return 'type' in block && block.type === 'paragraph';
 }
 
+interface ImageUploadMessage {
+  imageUrl: string;
+  pageSlug: string;
+  blockId: string;
+  notionPageId: string;
+}
+
 const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const notion = new Client({
     auth: env.NOTION_TOKEN,
@@ -639,15 +652,20 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       const imageUrl = block.parent.match(/\((.*?)\)/)?.[1];
       if (imageUrl) {
         try {
-          const blockId = block.blockId || `fallback-${i}`;
-          const blockObj = (await notion.blocks.retrieve({
-            block_id: blockId,
-          })) as ImageBlockObjectResponse;
-          const caption = blockObj.image?.caption[0]?.plain_text || '';
-          const { key } = await uploadImage(imageUrl, slug, blockId, env, s3);
-          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${caption}" />`;
-        } catch (error) {
-          console.error(`Failed to upload image: ${imageUrl}`, error);
+					const blockId = block.blockId || `fallback-${i}`;
+					const blockObj = await notion.blocks.retrieve({ block_id: blockId }) as ImageBlockObjectResponse;
+					const caption = blockObj.image?.caption[0]?.plain_text || '';
+					await env.IMAGE_UPLOAD_QUEUE.send({
+						imageUrl,
+						pageSlug: slug,
+						blockId,
+						notionPageId: pageId,
+					})
+					const filename = `${slug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
+					const key = `assets/${filename}`;
+					mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${caption}" />`;
+				} catch (error) {
+          console.error(`Failed to queue image image: ${imageUrl}`, error);
         }
       }
     }
@@ -1047,43 +1065,53 @@ export default {
     }
   },
 
-  async queue(
-    batch: MessageBatch<QueueMessageBody>,
-    env: Env,
-    ctx: ExecutionContext,
-  ): Promise<void> {
-    for (const message of batch.messages) {
+  async queue(batch: MessageBatch<QueueMessageBody | ImageUploadMessage>, env: Env, ctx: ExecutionContext): Promise<void> {
+    const s3 = createS3Client(env);
+		for (const message of batch.messages) {
       try {
-        const { type, payload, headers, processAllPages } = message.body;
+        if ('type' in message.body) {
+					const { type, payload, headers, processAllPages } = message.body;
 
-        // Handle Notion webhook messages
-        if (type === 'notion' && isNotionWebhookPayload(payload)) {
-          await processNotionWebhook(
-            payload,
-            {
-              headers: headers || {},
-              processAllPages: processAllPages || false,
-            },
-            env,
-          );
-          message.ack();
-          continue;
-        }
+					// Handle Notion webhook messages
+					if (type === 'notion' && isNotionWebhookPayload(payload)) {
+						await processNotionWebhook(
+							payload,
+							{
+								headers: headers || {},
+								processAllPages: processAllPages || false
+							},
+							env
+						);
+						message.ack();
+						continue;
+					}
 
-        // Handle R2 events
-        if (
-          isR2Event(payload) &&
-          payload.action === 'CopyObject' &&
-          payload.object.key.endsWith('image.webp')
-        ) {
-          await processR2Event(payload, env);
-          message.ack();
-          continue;
-        }
+					// Handle R2 events
+					if (isR2Event(payload) && payload.action === 'CopyObject' && payload.object.key.endsWith('image.webp')) {
+						await processR2Event(payload, env);
+						message.ack();
+						continue;
+					}
 
-        // Unknown message type
-        console.warn('Unknown message type received:', payload);
-        message.ack();
+					// Unknown message type
+					console.warn('Unknown message type received:', payload);
+					message.ack();
+				}
+				const { imageUrl, pageSlug, blockId } = message.body as ImageUploadMessage;
+				try {
+					await uploadImage(imageUrl, pageSlug, blockId, env, s3);
+					message.ack();
+				} catch (error) {
+					console.error('Error uploading image:', error);
+					if (message.attempts<3) {
+						message.retry({
+							delaySeconds: Math.pow(2, message.attempts) // 2s, 4s, 8s
+						});
+					} else {
+						console.error(`Failed to upload image after ${message.attempts} attempts:`, message.body);
+          	message.ack();
+					}
+				}
       } catch (error) {
         console.error('Error processing message:', error);
         if (message.attempts < 3) {
