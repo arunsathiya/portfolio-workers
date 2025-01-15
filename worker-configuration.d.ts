@@ -2,8 +2,8 @@
 // by running `wrangler types`
 
 interface Env {
-	CLOUDFLARE_ACCOUNT_ID: string;
-	R2_BUCKET_NAME: string;
-	CLOUDFLARE_R2_ACCESS_KEY_ID: string;
-	CLOUDFLARE_R2_SECRET_ACCESS_KEY: string;
+  CLOUDFLARE_ACCOUNT_ID: string;
+  R2_BUCKET_NAME: string;
+  CLOUDFLARE_R2_ACCESS_KEY_ID: string;
+  CLOUDFLARE_R2_SECRET_ACCESS_KEY: string;
 }
