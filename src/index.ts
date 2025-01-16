@@ -128,7 +128,7 @@ const handleAssets = async (request: Request, env: Env, s3Client: S3Client) => {
   console.log('Key:', key);
 
   try {
-    let cache = await env.BlogAssets.get<CachedSignedUrl>(key, `json`);
+    const cache = await env.BlogAssets.get<CachedSignedUrl>(key, 'json');
     let signedUrl: string;
 
     if (!cache || Date.now() > cache.refreshTime) {
@@ -231,7 +231,7 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
     };
 
     const githubResponse = await fetch(
-      `https://api.github.com/repos/arunsathiya/portfolio/dispatches`,
+      'https://api.github.com/repos/arunsathiya/portfolio/dispatches',
       {
         method: 'POST',
         headers: {
@@ -274,7 +274,7 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
 const handleImageGeneration = async (request: Request, env: Env) => {
   const authToken = request.headers.get('Authorization');
   if (!authToken || authToken !== `Bearer ${env.IMAGE_GENERATION_SECRET}`) {
-    return new Response(`Unauthorized`, { status: 401 });
+    return new Response('Unauthorized', { status: 401 });
   }
 
   try {
@@ -296,7 +296,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
       throw new Error(`Notion API error: ${notionResponse.statusText}`);
     }
 
-    const notionData: NotionResponse = await notionResponse.json();
+    const notionData: NotionResponse = (await notionResponse.json()) as NotionResponse;
     const latestPage = notionData.results.sort((a, b) =>
       b.last_edited_time.localeCompare(a.last_edited_time),
     )[0];
@@ -488,7 +488,7 @@ const commitToGitHub = async (files: FileChange[], message: string, env: Env): P
       },
       message: {
         headline: message,
-        body: `Commit created by github-actions[bot]\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`,
+        body: 'Commit created by github-actions[bot]\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>',
       },
       fileChanges: {
         additions,
@@ -646,7 +646,11 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
           const { key } = await uploadImage(imageUrl, slug, blockId, env, s3);
           mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${caption}" />`;
         } catch (error) {
+<<<<<<< HEAD
           console.error(`Failed to upload image: ${imageUrl}`, error);
+=======
+          console.error(`Failed to queue image: ${imageUrl}`, error);
+>>>>>>> 3186092 (chore(format): various fixes)
         }
       }
     }
@@ -877,7 +881,7 @@ const processNotionWebhook = async (
       // Commit all changes in a single batch
       const committed = await commitToGitHub(
         fileChanges,
-        `chore: update multiple pages from Notion`,
+        'chore: update multiple pages from Notion',
         env,
       );
       console.log(committed ? 'Successfully committed all page changes' : 'No changes needed');
@@ -966,7 +970,7 @@ export default {
         return handleGitHubDispatch(request, env);
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
-      case '/webhooks/notion':
+      case '/webhooks/notion': {
         const notionSignature = request.headers.get('x-notion-signature');
         if (!notionSignature || notionSignature !== `Bearer ${env.NOTION_SIGNATURE_SECRET}`) {
           return new Response('Unauthorized', { status: 401 });
@@ -996,6 +1000,7 @@ export default {
             headers: { 'Content-Type': 'application/json' },
           },
         );
+      }
       default:
         return new Response('Not Found', { status: 404 });
     }
@@ -1034,15 +1039,36 @@ export default {
           message.ack();
           continue;
         }
+<<<<<<< HEAD
 
         // Unknown message type
         console.warn('Unknown message type received:', payload);
         message.ack();
+=======
+        const { imageUrl, pageSlug, blockId } = message.body as ImageUploadMessage;
+        try {
+          await uploadImage(imageUrl, pageSlug, blockId, env, s3);
+          message.ack();
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          if (message.attempts < 3) {
+            message.retry({
+              delaySeconds: 2 ** message.attempts,
+            });
+          } else {
+            console.error(
+              `Failed to upload image after ${message.attempts} attempts:`,
+              message.body,
+            );
+            message.ack();
+          }
+        }
+>>>>>>> 3186092 (chore(format): various fixes)
       } catch (error) {
         console.error('Error processing message:', error);
         if (message.attempts < 3) {
           message.retry({
-            delaySeconds: Math.pow(2, message.attempts), // 2s, 4s, 8s
+            delaySeconds: 2 ** message.attempts,
           });
         } else {
           console.error(
