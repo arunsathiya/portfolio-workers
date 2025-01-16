@@ -1019,8 +1019,14 @@ export default {
         }
         return handleGitHubDispatch(request, env);
       case '/webhooks/replicate':
+        if (request.method !== 'POST') {
+          return new Response('Method not allowed', { status: 405 });
+        }
         return handleReplicateWebhook(request, env);
       case '/webhooks/notion': {
+        if (request.method !== 'POST') {
+          return new Response('Method not allowed', { status: 405 });
+        }
         const notionSignature =
           request.headers.get('x-notion-signature')?.replace('Bearer ', '') || '';
         if (
