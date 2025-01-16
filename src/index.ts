@@ -1,11 +1,24 @@
-import { DataRedundancy, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DataRedundancy,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import Replicate, { ApiError, validateWebhook } from 'replicate';
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic from '@anthropic-ai/sdk';
 import { Client } from '@notionhq/client';
 
 import { Buffer } from 'node:buffer';
-import { BlockObjectResponse, ImageBlockObjectResponse, PageObjectResponse, PartialBlockObjectResponse, RichTextItemResponse, TextRichTextItemResponse } from '@notionhq/client/build/src/api-endpoints';
+import {
+  BlockObjectResponse,
+  ImageBlockObjectResponse,
+  PageObjectResponse,
+  PartialBlockObjectResponse,
+  RichTextItemResponse,
+  TextRichTextItemResponse,
+} from '@notionhq/client/build/src/api-endpoints';
 import { NotionToMarkdown } from 'notion-to-md';
 import path from 'node:path';
 
@@ -22,11 +35,11 @@ interface Env {
   PORTFOLIO_BUCKET: R2Bucket;
   ANTHROPIC_API_KEY: string;
   NOTION_TOKEN: string;
-	NOTION_DATABASE_ID: string;
+  NOTION_DATABASE_ID: string;
   GITHUB_PAT: string;
   DISPATCH_SECRET: string;
-	NOTION_QUEUE: Queue<NotionWebhookPayload>;
-	NOTION_SIGNATURE_SECRET: string;
+  NOTION_QUEUE: Queue<NotionWebhookPayload>;
+  NOTION_SIGNATURE_SECRET: string;
 }
 
 interface CachedSignedUrl {
@@ -66,12 +79,12 @@ interface ReplicatePrediction {
 interface NotionResponse {
   results: {
     properties: {
-      "Date frontmatter": {
+      'Date frontmatter': {
         formula: {
           string: string;
         };
       };
-      "Slug frontmatter": {
+      'Slug frontmatter': {
         formula: {
           string: string;
         };
@@ -81,7 +94,7 @@ interface NotionResponse {
           plain_text: string;
         }[];
       };
-      "Generate Image Title": {
+      'Generate Image Title': {
         rich_text: {
           plain_text: string;
         }[];
@@ -99,14 +112,15 @@ interface GitHubWorkflowDispatch {
   };
 }
 
-const createS3Client = (env: Env) => new S3Client({
-  region: 'auto',
-  endpoint: `https://${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: env.CLOUDFLARE_R2_ACCESS_KEY_ID,
-    secretAccessKey: env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
-  },
-});
+const createS3Client = (env: Env) =>
+  new S3Client({
+    region: 'auto',
+    endpoint: `https://${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: env.CLOUDFLARE_R2_ACCESS_KEY_ID,
+      secretAccessKey: env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
+    },
+  });
 
 const handleAssets = async (request: Request, env: Env, s3Client: S3Client) => {
   const url = new URL(request.url);
@@ -114,16 +128,19 @@ const handleAssets = async (request: Request, env: Env, s3Client: S3Client) => {
   console.log('Key:', key);
 
   try {
-    let cache = await env.BlogAssets.get<CachedSignedUrl>(key, `json`);
+    const cache = await env.BlogAssets.get<CachedSignedUrl>(key, 'json');
     let signedUrl: string;
 
     if (!cache || Date.now() > cache.refreshTime) {
       const command = new GetObjectCommand({ Bucket: env.R2_BUCKET_NAME, Key: key });
       signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-      await env.BlogAssets.put(key, JSON.stringify({
-        url: signedUrl,
-        refreshTime: Date.now() + 55 * 60 * 1000,
-      }));
+      await env.BlogAssets.put(
+        key,
+        JSON.stringify({
+          url: signedUrl,
+          refreshTime: Date.now() + 55 * 60 * 1000,
+        }),
+      );
     } else {
       console.log(`Used cached signed URL for ${key}`);
       signedUrl = cache.url;
@@ -146,37 +163,42 @@ const generateImagePrompt = async (title: string, env: Env) => {
     throw new Error('IMAGE_GENERATION_BASE_PROMPT not found in environment variables');
   }
   const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-  const image_url = "https://closet.tools/uploads/poshmark-algorithm.png"
-  const image_media_type = "image/png"
-  const image_array_buffer = await ((await fetch(image_url)).arrayBuffer());
+  const image_url = 'https://closet.tools/uploads/poshmark-algorithm.png';
+  const image_media_type = 'image/png';
+  const image_array_buffer = await (await fetch(image_url)).arrayBuffer();
   const image_data = Buffer.from(image_array_buffer).toString('base64');
   const msg = await anthropic.messages.create({
-    model: "claude-3-5-sonnet-latest",
+    model: 'claude-3-5-sonnet-latest',
     max_tokens: 1000,
     temperature: 0,
-    system: "Reply only with the generated prompt and not anything else, including any prefix message that the requested prompt is generated.",
+    system:
+      'Reply only with the generated prompt and not anything else, including any prefix message that the requested prompt is generated.',
     messages: [
       {
-        "role": "user",
-        "content": [{
-          "type": "text",
-          "text": `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background? It can be any dark color. Aim to match the same font styling as in the base prompt.`,
-        }]
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `This is the prompt I have for the attached image:\n\n${basePrompt}\n\nCan you generate a similar prompt with creative materials relating to the blog post titled "${title}", but with a darker background? It can be any dark color. Aim to match the same font styling as in the base prompt.`,
+          },
+        ],
       },
       {
-        "role": "user",
-        "content": [{
-          "type": "image",
-          "source": {
-            "type": "base64",
-            "media_type": image_media_type,
-            "data": image_data,
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: image_media_type,
+              data: image_data,
+            },
           },
-        }]
+        ],
       },
-    ]
+    ],
   });
-  return msg.content[0].type === "text" ? msg.content[0].text : "";
+  return msg.content[0].type === 'text' ? msg.content[0].text : '';
 };
 
 function isReplicateApiError(error: unknown): error is ApiError {
@@ -198,51 +220,53 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
   }
 
   try {
-    const body = await request.json() as DispatchRequest;
-    const commit_message = body.commit_message || "chore: update from Notion";
+    const body = (await request.json()) as DispatchRequest;
+    const commit_message = body.commit_message || 'chore: update from Notion';
 
     const dispatch: GitHubDispatch = {
-      event_type: "chore: fetch and commit Notion changes",
+      event_type: 'chore: fetch and commit Notion changes',
       client_payload: {
-        commit_message
-      }
+        commit_message,
+      },
     };
 
     const githubResponse = await fetch(
-      `https://api.github.com/repos/arunsathiya/portfolio/dispatches`,
+      'https://api.github.com/repos/arunsathiya/portfolio/dispatches',
       {
         method: 'POST',
         headers: {
-          'Accept': 'application/vnd.github+json',
-          'Authorization': `Bearer ${env.DISPATCH_SECRET}`,
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${env.DISPATCH_SECRET}`,
           'X-GitHub-Api-Version': '2022-11-28',
           'Content-Type': 'application/json',
-          'User-Agent': 'Cloudflare-Worker'
+          'User-Agent': 'Cloudflare-Worker',
         },
-        body: JSON.stringify(dispatch)
-      }
+        body: JSON.stringify(dispatch),
+      },
     );
 
     if (!githubResponse.ok) {
       throw new Error(`GitHub API error: ${githubResponse.statusText}`);
     }
 
-    return new Response(JSON.stringify({
-      commit_message,
-      status: 'GitHub repository dispatch triggered'
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-
+    return new Response(
+      JSON.stringify({
+        commit_message,
+        status: 'GitHub repository dispatch triggered',
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   } catch (error) {
     console.error('Error:', error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error occurred' }),
       {
         status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
+        headers: { 'Content-Type': 'application/json' },
+      },
     );
   }
 };
@@ -250,7 +274,7 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
 const handleImageGeneration = async (request: Request, env: Env) => {
   const authToken = request.headers.get('Authorization');
   if (!authToken || authToken !== `Bearer ${env.IMAGE_GENERATION_SECRET}`) {
-    return new Response(`Unauthorized`, { status: 401 });
+    return new Response('Unauthorized', { status: 401 });
   }
 
   try {
@@ -260,28 +284,29 @@ const handleImageGeneration = async (request: Request, env: Env) => {
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${env.NOTION_TOKEN}`,
+          Authorization: `Bearer ${env.NOTION_TOKEN}`,
           'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ page_size: 100 })
-      }
+        body: JSON.stringify({ page_size: 100 }),
+      },
     );
 
     if (!notionResponse.ok) {
       throw new Error(`Notion API error: ${notionResponse.statusText}`);
     }
 
-    const notionData: NotionResponse = await notionResponse.json();
-    const latestPage = notionData.results
-      .sort((a, b) => b.last_edited_time.localeCompare(a.last_edited_time))[0];
+    const notionData: NotionResponse = (await notionResponse.json()) as NotionResponse;
+    const latestPage = notionData.results.sort((a, b) =>
+      b.last_edited_time.localeCompare(a.last_edited_time),
+    )[0];
 
     // Extract date and slug
-    const date = latestPage.properties["Date frontmatter"].formula.string;
-    const slug = latestPage.properties["Slug frontmatter"].formula.string;
+    const date = latestPage.properties['Date frontmatter'].formula.string;
+    const slug = latestPage.properties['Slug frontmatter'].formula.string;
 
     // Extract image generation prompt
-    const imageTitle = latestPage.properties["Generate Image Title"].rich_text[0].plain_text;
+    const imageTitle = latestPage.properties['Generate Image Title'].rich_text[0].plain_text;
 
     // Generate and trigger image creation
     const prompt = await generateImagePrompt(imageTitle, env);
@@ -289,21 +314,24 @@ const handleImageGeneration = async (request: Request, env: Env) => {
     const callbackUrl = `https://www.arun.blog/webhooks/replicate?date=${date}&slug=${slug}`;
 
     await replicate.predictions.create({
-      model: "black-forest-labs/flux-schnell",
-      input: { prompt, num_outputs: 4, aspect_ratio: "16:9" },
+      model: 'black-forest-labs/flux-schnell',
+      input: { prompt, num_outputs: 4, aspect_ratio: '16:9' },
       webhook: callbackUrl,
-      webhook_events_filter: ["completed"]
+      webhook_events_filter: ['completed'],
     });
 
-    return new Response(JSON.stringify({
-      imageTitle,
-      date,
-      slug,
-      status: 'Image generation requested'
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response(
+      JSON.stringify({
+        imageTitle,
+        date,
+        slug,
+        status: 'Image generation requested',
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   } catch (error) {
     if (isReplicateApiError(error)) {
       const status = error.response.status;
@@ -323,11 +351,14 @@ const handleImageGeneration = async (request: Request, env: Env) => {
 
 const handleReplicateWebhook = async (request: Request, env: Env) => {
   const rawBody = await request.text();
-  const valid = await validateWebhook(new Request(request.url, {
-    method: request.method,
-    headers: request.headers,
-    body: rawBody
-  }), env.REPLICATE_WEBHOOK_SIGNING_KEY);
+  const valid = await validateWebhook(
+    new Request(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: rawBody,
+    }),
+    env.REPLICATE_WEBHOOK_SIGNING_KEY,
+  );
   if (!valid) {
     return new Response('Invalid webhook signature', { status: 401 });
   }
@@ -337,12 +368,12 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
   if (!date || !slug) {
     return new Response('Missing blog post date or slug', { status: 400 });
   }
-  const payload: ReplicatePrediction = JSON.parse(rawBody)
+  const payload: ReplicatePrediction = JSON.parse(rawBody);
   if (!Array.isArray(payload.output)) {
     return new Response('Invalid output format', { status: 400 });
   }
   const uploadPromises = payload.output.map(async (output, index) => {
-    const imageBody = await fetch(output).then(r => r.arrayBuffer());
+    const imageBody = await fetch(output).then((r) => r.arrayBuffer());
     const fileExtension = output.split('.').pop() || 'webp';
     const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
     return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
@@ -399,11 +430,11 @@ const getFileContent = async (path: string, env: Env): Promise<string | null> =>
   const response = await fetch('https://api.github.com/graphql', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${env.GITHUB_PAT}`,
       'Content-Type': 'application/json',
-      'User-Agent': 'Cloudflare-Worker'
+      'User-Agent': 'Cloudflare-Worker',
     },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ query }),
   });
 
   if (!response.ok) {
@@ -412,38 +443,34 @@ const getFileContent = async (path: string, env: Env): Promise<string | null> =>
 
   const result = await response.json();
   return result.data.repository.object?.text ?? null;
-}
+};
 
 interface FileChange {
   path: string;
   content: string;
 }
 
-const commitToGitHub = async (
-  files: FileChange[],
-  message: string,
-  env: Env
-): Promise<boolean> => {
-	let hasChanges = false
-	const additions = [];
+const commitToGitHub = async (files: FileChange[], message: string, env: Env): Promise<boolean> => {
+  let hasChanges = false;
+  const additions = [];
 
-	for (const file of files) {
+  for (const file of files) {
     const currentContent = await getFileContent(file.path, env);
     if (currentContent !== file.content) {
       hasChanges = true;
       additions.push({
         path: file.path,
-        contents: Buffer.from(file.content).toString('base64')
+        contents: Buffer.from(file.content).toString('base64'),
       });
     }
   }
 
-	if (!hasChanges) {
+  if (!hasChanges) {
     console.log('No changes detected in any files, skipping commit');
     return false;
   }
 
-	const query = `
+  const query = `
     mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) {
       createCommitOnBranch(input: $input) {
         commit {
@@ -457,30 +484,30 @@ const commitToGitHub = async (
     input: {
       branch: {
         repositoryNameWithOwner: 'arunsathiya/portfolio',
-        branchName: 'main'
+        branchName: 'main',
       },
       message: {
         headline: message,
-        body: `Commit created by github-actions[bot]\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`
+        body: 'Commit created by github-actions[bot]\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>',
       },
       fileChanges: {
-        additions
+        additions,
       },
-      expectedHeadOid: await getLatestCommitOid(env)
-    }
+      expectedHeadOid: await getLatestCommitOid(env),
+    },
   };
 
   const response = await fetch('https://api.github.com/graphql', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${env.GITHUB_PAT}`,
       'Content-Type': 'application/json',
-      'User-Agent': 'Cloudflare-Worker'
+      'User-Agent': 'Cloudflare-Worker',
     },
     body: JSON.stringify({
       query,
-      variables
-    })
+      variables,
+    }),
   });
 
   if (!response.ok) {
@@ -491,8 +518,8 @@ const commitToGitHub = async (
   if (result.errors) {
     throw new Error(`GraphQL Error: ${JSON.stringify(result.errors)}`);
   }
-	return true;
-}
+  return true;
+};
 
 const getLatestCommitOid = async (env: Env): Promise<string> => {
   const query = `
@@ -510,16 +537,16 @@ const getLatestCommitOid = async (env: Env): Promise<string> => {
   const response = await fetch('https://api.github.com/graphql', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${env.GITHUB_PAT}`,
+      Authorization: `Bearer ${env.GITHUB_PAT}`,
       'Content-Type': 'application/json',
-      'User-Agent': 'Cloudflare-Worker'
+      'User-Agent': 'Cloudflare-Worker',
     },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ query }),
   });
 
   const result = await response.json();
   return result.data.repository.defaultBranchRef.target.oid;
-}
+};
 
 interface NotionWebhookPayload {
   source: {
@@ -545,54 +572,64 @@ interface NotionWebhookPayload {
 }
 
 function formatDate(dateString: string): string {
-	const date = new Date(dateString);
-	const month = date.toLocaleString('default', { month: 'short', timeZone: 'UTC' });
-	const day = date.getUTCDate().toString().padStart(2, '0');
-	const year = date.getUTCFullYear();
-	return `${month} ${day} ${year}`;
+  const date = new Date(dateString);
+  const month = date.toLocaleString('default', { month: 'short', timeZone: 'UTC' });
+  const day = date.getUTCDate().toString().padStart(2, '0');
+  const year = date.getUTCFullYear();
+  return `${month} ${day} ${year}`;
 }
 
 function formatDateForFolder(dateString: string): string {
-	return new Date(dateString).toISOString().split('T')[0];
+  return new Date(dateString).toISOString().split('T')[0];
 }
 
 type NotionClient = InstanceType<typeof Client>;
 type UpdateBlockParameters = Parameters<NotionClient['blocks']['update']>[0];
 
 function isTextRichTextItem(item: RichTextItemResponse): item is TextRichTextItemResponse {
-	return item.type === 'text';
+  return item.type === 'text';
 }
 
-function isParagraphBlock(block: BlockObjectResponse | PartialBlockObjectResponse): block is BlockObjectResponse & { type: 'paragraph' } {
-	return 'type' in block && block.type === 'paragraph';
+function isParagraphBlock(
+  block: BlockObjectResponse | PartialBlockObjectResponse,
+): block is BlockObjectResponse & { type: 'paragraph' } {
+  return 'type' in block && block.type === 'paragraph';
 }
 
 const processPage = async (pageId: string, env: Env, s3: S3Client) => {
-  const notion = new Client({ auth: env.NOTION_TOKEN, notionVersion: '2022-06-28', fetch: (input, init) => fetch(input, init) });
-  const n2m = new NotionToMarkdown({ notionClient: notion,
-		config: {
-			parseChildPages: false,
-			separateChildPage: false,
-		}
-	 });
+  const notion = new Client({
+    auth: env.NOTION_TOKEN,
+    notionVersion: '2022-06-28',
+    fetch: (input, init) => fetch(input, init),
+  });
+  const n2m = new NotionToMarkdown({
+    notionClient: notion,
+    config: {
+      parseChildPages: false,
+      separateChildPage: false,
+    },
+  });
 
   const mdblocks = await n2m.pageToMarkdown(pageId);
-	const page = await notion.pages.retrieve({ page_id: pageId }) as PageObjectResponse
+  const page = (await notion.pages.retrieve({ page_id: pageId })) as PageObjectResponse;
 
   // Extract page properties
-  const title = page.properties.Title.type === 'title' && page.properties.Title.title.length > 1
-    ? page.properties.Title.title.map((t) => t.plain_text.trim()).join(' ')
-    : page.properties.Title.type === 'title'
-      ? page.properties.Title.title[0]?.plain_text.trim()
-      : 'Untitled';
+  const title =
+    page.properties.Title.type === 'title' && page.properties.Title.title.length > 1
+      ? page.properties.Title.title.map((t) => t.plain_text.trim()).join(' ')
+      : page.properties.Title.type === 'title'
+        ? page.properties.Title.title[0]?.plain_text.trim()
+        : 'Untitled';
 
-  const slug = page.properties.Slug.type === 'formula' && page.properties.Slug?.formula?.type == 'string'
-    ? (page.properties.Slug.formula?.string as string)
-    : '';
+  const slug =
+    page.properties.Slug.type === 'formula' && page.properties.Slug?.formula?.type == 'string'
+      ? (page.properties.Slug.formula?.string as string)
+      : '';
 
-  const description = page.properties.Description.type === 'rich_text'
-    ? page.properties.Description.rich_text[0]?.plain_text.trim()
-    : '';
+  const description =
+    page.properties.Description.type === 'rich_text'
+      ? page.properties.Description.rich_text[0]?.plain_text.trim()
+      : '';
 
   // Process images in the markdown blocks
   for (let i = 0; i < mdblocks.length; i++) {
@@ -601,13 +638,19 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       const imageUrl = block.parent.match(/\((.*?)\)/)?.[1];
       if (imageUrl) {
         try {
-					const blockId = block.blockId || `fallback-${i}`;
-					const blockObj = await notion.blocks.retrieve({ block_id: blockId }) as ImageBlockObjectResponse;
-					const caption = blockObj.image?.caption[0]?.plain_text || '';
-					const { key } = await uploadImage(imageUrl, slug, blockId, env, s3)
-					mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${caption}" />`;
-				} catch (error) {
+          const blockId = block.blockId || `fallback-${i}`;
+          const blockObj = (await notion.blocks.retrieve({
+            block_id: blockId,
+          })) as ImageBlockObjectResponse;
+          const caption = blockObj.image?.caption[0]?.plain_text || '';
+          const { key } = await uploadImage(imageUrl, slug, blockId, env, s3);
+          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${caption}" />`;
+        } catch (error) {
+<<<<<<< HEAD
           console.error(`Failed to upload image: ${imageUrl}`, error);
+=======
+          console.error(`Failed to queue image: ${imageUrl}`, error);
+>>>>>>> 3186092 (chore(format): various fixes)
         }
       }
     }
@@ -617,21 +660,24 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const convertedMdString = mdString.parent.replace(/\[(embed|video)\]\((https?:\/\/\S+)\)/g, '$2');
 
   // Get dates
-  const pubDate = page.properties.Date?.type === 'date' && page.properties.Date.date?.start
-    ? formatDate(page.properties.Date.date.start)
-    : formatDate(page.created_time);
+  const pubDate =
+    page.properties.Date?.type === 'date' && page.properties.Date.date?.start
+      ? formatDate(page.properties.Date.date.start)
+      : formatDate(page.created_time);
 
   const updatedDate = formatDate(page.last_edited_time);
 
   // Get tags
-  const tags = page.properties.Tags?.type === 'multi_select'
-    ? page.properties.Tags.multi_select.map((tag) => tag.name)
-    : [];
+  const tags =
+    page.properties.Tags?.type === 'multi_select'
+      ? page.properties.Tags.multi_select.map((tag) => tag.name)
+      : [];
 
   // Get folder date
-  const folderDate = page.properties.Date?.type === 'date' && page.properties.Date.date?.start
-    ? formatDateForFolder(page.properties.Date.date.start)
-    : formatDateForFolder(page.created_time);
+  const folderDate =
+    page.properties.Date?.type === 'date' && page.properties.Date.date?.start
+      ? formatDateForFolder(page.properties.Date.date.start)
+      : formatDateForFolder(page.created_time);
 
   const postContainsImages = mdblocks.some((block) => block.parent.includes('R2Image'));
 
@@ -652,68 +698,74 @@ ${convertedMdString.replace(/\n\n/g, '\n')}`;
 
   return {
     content,
-    path: `src/content/blog/${folderDate}-${slug}/index.mdx`
+    path: `src/content/blog/${folderDate}-${slug}/index.mdx`,
   };
-}
+};
 
-const uploadImage = async (imageUrl: string, pageSlug: string, blockId: string, env: Env, s3: S3Client): Promise<{ uploaded: boolean; key: string }> => {
-	try {
-		// Generate a unique filename using blockId
-		const filename = `${pageSlug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
-		const key = `assets/${filename}`;
+const uploadImage = async (
+  imageUrl: string,
+  pageSlug: string,
+  blockId: string,
+  env: Env,
+  s3: S3Client,
+): Promise<{ uploaded: boolean; key: string }> => {
+  try {
+    // Generate a unique filename using blockId
+    const filename = `${pageSlug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
+    const key = `assets/${filename}`;
 
-		// Check if the file already exists in the bucket
-		try {
-			const headCommand = new HeadObjectCommand({
-				Bucket: env.R2_BUCKET_NAME!,
-				Key: key,
-			});
-			await s3.send(headCommand);
+    // Check if the file already exists in the bucket
+    try {
+      const headCommand = new HeadObjectCommand({
+        Bucket: env.R2_BUCKET_NAME!,
+        Key: key,
+      });
+      await s3.send(headCommand);
 
-			// If we reach here, the file exists.
-			console.log('Image already exists in the bucket.');
-			return { uploaded: false, key };
-		} catch (error) {
-			// If the file doesn't exist, we'll get an error. Proceed with upload.
-			console.log('Image does not exist in the bucket. Proceeding with upload.');
-		}
+      // If we reach here, the file exists.
+      console.log('Image already exists in the bucket.');
+      return { uploaded: false, key };
+    } catch (error) {
+      // If the file doesn't exist, we'll get an error. Proceed with upload.
+      console.log('Image does not exist in the bucket. Proceeding with upload.');
+    }
 
-		// Download the image
-		const response = await fetch(imageUrl, {
-			headers: {
-				Accept: 'image/*',
-			},
-		});
-		if (!response.ok) {
-			throw new Error(`HTTP error! status: ${response.status}`);
-		}
-		const buffer = await response.arrayBuffer();
+    // Download the image
+    const response = await fetch(imageUrl, {
+      headers: {
+        Accept: 'image/*',
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const buffer = await response.arrayBuffer();
 
-		// Upload to R2
-		const uploadCommand = new PutObjectCommand({
-			Bucket: env.R2_BUCKET_NAME!,
-			Key: key,
-			Body: Buffer.from(buffer),
-			ContentType: response.headers.get('content-type') || 'image/png',
-		});
+    // Upload to R2
+    const uploadCommand = new PutObjectCommand({
+      Bucket: env.R2_BUCKET_NAME!,
+      Key: key,
+      Body: Buffer.from(buffer),
+      ContentType: response.headers.get('content-type') || 'image/png',
+    });
 
-		const result = await s3.send(uploadCommand);
+    const result = await s3.send(uploadCommand);
 
-		if (result.$metadata.httpStatusCode !== 200) {
-			throw new Error(`Upload failed with status code: ${result.$metadata.httpStatusCode}`);
-		}
+    if (result.$metadata.httpStatusCode !== 200) {
+      throw new Error(`Upload failed with status code: ${result.$metadata.httpStatusCode}`);
+    }
 
-		console.log('Upload successful. Key:', key);
-		return { uploaded: true, key };
-	} catch (error) {
-		console.error('Error uploading image to R2:', error);
-		if (error instanceof Error) {
-			console.error('Error message:', error.message);
-			console.error('Error stack:', error.stack);
-		}
-		throw error;
-	}
-}
+    console.log('Upload successful. Key:', key);
+    return { uploaded: true, key };
+  } catch (error) {
+    console.error('Error uploading image to R2:', error);
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
+    throw error;
+  }
+};
 
 interface NotionWebhookPayload {
   source: {
@@ -740,11 +792,13 @@ interface NotionWebhookPayload {
 
 // Type guard to check if a message is a Notion webhook payload
 function isNotionWebhookPayload(payload: any): payload is NotionWebhookPayload {
-  return payload
-    && 'data' in payload
-    && 'id' in payload.data
-    && 'parent' in payload.data
-    && 'database_id' in payload.data.parent;
+  return (
+    payload &&
+    'data' in payload &&
+    'id' in payload.data &&
+    'parent' in payload.data &&
+    'database_id' in payload.data.parent
+  );
 }
 
 // Type guard for R2 event
@@ -769,7 +823,7 @@ interface QueueMessageBody {
 const processNotionWebhook = async (
   payload: NotionWebhookPayload,
   context: NotionWebhookContext,
-  env: Env
+  env: Env,
 ) => {
   const s3 = createS3Client(env);
   const { processAllPages } = context;
@@ -786,7 +840,7 @@ const processNotionWebhook = async (
     const notion = new Client({
       auth: env.NOTION_TOKEN,
       notionVersion: '2022-06-28',
-      fetch: (input, init) => fetch(input, init)
+      fetch: (input, init) => fetch(input, init),
     });
 
     const pages = await notion.databases.query({
@@ -819,7 +873,7 @@ const processNotionWebhook = async (
 
       // Optional: Add a small delay between batches to prevent rate limiting
       if (i + BATCH_SIZE < pages.results.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
@@ -827,8 +881,8 @@ const processNotionWebhook = async (
       // Commit all changes in a single batch
       const committed = await commitToGitHub(
         fileChanges,
-        `chore: update multiple pages from Notion`,
-        env
+        'chore: update multiple pages from Notion',
+        env,
       );
       console.log(committed ? 'Successfully committed all page changes' : 'No changes needed');
     } else {
@@ -838,17 +892,19 @@ const processNotionWebhook = async (
     // Process single page as before
     const { content, path } = await processPage(pageId, env, s3);
     await commitToGitHub(
-      [{
-        path,
-        content,
-      }],
+      [
+        {
+          path,
+          content,
+        },
+      ],
       `chore: update ${path}`,
-      env
+      env,
     );
   }
 
   console.log('Successfully processed Notion webhook for page:', pageId);
-}
+};
 
 // Helper function to process R2 events
 async function processR2Event(event: R2EventMessage, env: Env) {
@@ -857,7 +913,7 @@ async function processR2Event(event: R2EventMessage, env: Env) {
     sourceKey: event.copySource?.object,
     destinationKey: event.object.key,
     size: event.object.size,
-    eTag: event.object.eTag
+    eTag: event.object.eTag,
   });
 
   const pathParts = event.object.key.split('/');
@@ -874,18 +930,20 @@ async function processR2Event(event: R2EventMessage, env: Env) {
     const path = `src/content/blog/${dateSlugPart}/image.webp`;
 
     await commitToGitHub(
-      [{
-				path,
-				content,
-			}],
+      [
+        {
+          path,
+          content,
+        },
+      ],
       `chore: update cover image for ${dateSlugPart}`,
-      env
+      env,
     );
 
     console.log('Successfully processed image:', {
       r2Path: event.object.key,
       gitPath: path,
-      size: event.object.size
+      size: event.object.size,
     });
   }
 }
@@ -912,16 +970,16 @@ export default {
         return handleGitHubDispatch(request, env);
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
-      case '/webhooks/notion':
+      case '/webhooks/notion': {
         const notionSignature = request.headers.get('x-notion-signature');
         if (!notionSignature || notionSignature !== `Bearer ${env.NOTION_SIGNATURE_SECRET}`) {
           return new Response('Unauthorized', { status: 401 });
         }
-        const payload = await request.json() as NotionWebhookPayload;
+        const payload = (await request.json()) as NotionWebhookPayload;
 
         // Extract relevant headers and process-all flag
         const relevantHeaders = {
-          'x-notion-signature': notionSignature
+          'x-notion-signature': notionSignature,
         };
         const processAllPages = request.headers.has('x-process-all-pages');
 
@@ -929,22 +987,30 @@ export default {
           type: 'notion',
           payload,
           headers: relevantHeaders,
-          processAllPages
+          processAllPages,
         });
 
-        return new Response(JSON.stringify({
-          status: 'accepted',
-          message: 'Webhook received and queued for processing'
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new Response(
+          JSON.stringify({
+            status: 'accepted',
+            message: 'Webhook received and queued for processing',
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
       default:
         return new Response('Not Found', { status: 404 });
     }
   },
 
-  async queue(batch: MessageBatch<QueueMessageBody>, env: Env, ctx: ExecutionContext): Promise<void> {
+  async queue(
+    batch: MessageBatch<QueueMessageBody>,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     for (const message of batch.messages) {
       try {
         const { type, payload, headers, processAllPages } = message.body;
@@ -955,36 +1021,63 @@ export default {
             payload,
             {
               headers: headers || {},
-              processAllPages: processAllPages || false
+              processAllPages: processAllPages || false,
             },
-            env
+            env,
           );
           message.ack();
           continue;
         }
 
         // Handle R2 events
-        if (isR2Event(payload) && payload.action === 'CopyObject' && payload.object.key.endsWith('image.webp')) {
+        if (
+          isR2Event(payload) &&
+          payload.action === 'CopyObject' &&
+          payload.object.key.endsWith('image.webp')
+        ) {
           await processR2Event(payload, env);
           message.ack();
           continue;
         }
+<<<<<<< HEAD
 
         // Unknown message type
         console.warn('Unknown message type received:', payload);
         message.ack();
-
+=======
+        const { imageUrl, pageSlug, blockId } = message.body as ImageUploadMessage;
+        try {
+          await uploadImage(imageUrl, pageSlug, blockId, env, s3);
+          message.ack();
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          if (message.attempts < 3) {
+            message.retry({
+              delaySeconds: 2 ** message.attempts,
+            });
+          } else {
+            console.error(
+              `Failed to upload image after ${message.attempts} attempts:`,
+              message.body,
+            );
+            message.ack();
+          }
+        }
+>>>>>>> 3186092 (chore(format): various fixes)
       } catch (error) {
         console.error('Error processing message:', error);
         if (message.attempts < 3) {
           message.retry({
-            delaySeconds: Math.pow(2, message.attempts) // 2s, 4s, 8s
+            delaySeconds: 2 ** message.attempts,
           });
         } else {
-          console.error(`Failed to process message after ${message.attempts} attempts:`, message.body);
+          console.error(
+            `Failed to process message after ${message.attempts} attempts:`,
+            message.body,
+          );
           message.ack();
         }
       }
     }
-  }
+  },
 } satisfies ExportedHandler<Env>;

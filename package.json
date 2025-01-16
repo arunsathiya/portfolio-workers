@@ -6,9 +6,13 @@
     "dev": "wrangler dev",
     "start": "wrangler dev",
     "test": "vitest",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "format": "biome format --write .",
+    "check": "biome check .",
+    "lint": "biome lint ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@cloudflare/vitest-pool-workers": "^0.5.18",
     "@cloudflare/workers-types": "^4.20250109.0",
     "@vitest/runner": "^2.1.8",
