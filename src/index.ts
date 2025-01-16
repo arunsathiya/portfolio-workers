@@ -665,7 +665,7 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
           const key = `assets/${filename}`;
           mdblocks[i].parent = `<R2Image imageKey="${key}" alt="/" />`;
         } catch (error) {
-          console.error(`Failed to queue image image: ${imageUrl}`, error);
+          console.error(`Failed to queue image: ${imageUrl}`, error);
         }
       }
     }
@@ -1060,6 +1060,7 @@ export default {
             headers: { 'Content-Type': 'application/json' },
           },
         );
+      }
       default:
         return new Response('Not Found', { status: 404 });
     }
@@ -1099,7 +1100,7 @@ export default {
           console.error('Error uploading image:', error);
           if (message.attempts < 3) {
             message.retry({
-              delaySeconds: Math.pow(2, message.attempts), // 2s, 4s, 8s
+              delaySeconds: 2 ** message.attempts,
             });
           } else {
             console.error(
