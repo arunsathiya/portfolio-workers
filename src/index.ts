@@ -214,8 +214,7 @@ function isReplicateApiError(error: unknown): error is ApiError {
 }
 
 const handleGitHubDispatch = async (request: Request, env: Env) => {
-  const authToken = request.headers.get('Authorization');
-  if (!authToken || authToken !== `Bearer ${env.DISPATCH_SECRET}`) {
+  if (!env.DISPATCH_SECRET || !(await validateAuthToken(request, env.DISPATCH_SECRET))) {
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -272,8 +271,10 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
 };
 
 const handleImageGeneration = async (request: Request, env: Env) => {
-  const authToken = request.headers.get('Authorization');
-  if (!authToken || authToken !== `Bearer ${env.IMAGE_GENERATION_SECRET}`) {
+  if (
+    !env.IMAGE_GENERATION_SECRET ||
+    !(await validateAuthToken(request, env.IMAGE_GENERATION_SECRET))
+  ) {
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -646,11 +647,7 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
           const { key } = await uploadImage(imageUrl, slug, blockId, env, s3);
           mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${caption}" />`;
         } catch (error) {
-<<<<<<< HEAD
           console.error(`Failed to upload image: ${imageUrl}`, error);
-=======
-          console.error(`Failed to queue image: ${imageUrl}`, error);
->>>>>>> 3186092 (chore(format): various fixes)
         }
       }
     }
@@ -948,6 +945,46 @@ async function processR2Event(event: R2EventMessage, env: Env) {
   }
 }
 
+// Double HMAC implementation for timing-safe comparison
+async function timingSafeEqual(
+  bufferSource1: ArrayBuffer,
+  bufferSource2: ArrayBuffer,
+): Promise<boolean> {
+  if (bufferSource1.byteLength !== bufferSource2.byteLength) {
+    return false;
+  }
+  const algorithm = { name: 'HMAC', hash: 'SHA-256' };
+  const key = await crypto.subtle.generateKey(algorithm, false, ['sign', 'verify']);
+  const hmac = await crypto.subtle.sign(algorithm, key, bufferSource1);
+  return await crypto.subtle.verify(algorithm, key, hmac, bufferSource2);
+}
+
+// Helper function for secure token comparison
+const compareTokens = async (secret: string, token: string): Promise<boolean> => {
+  if (!secret || !token) {
+    return false;
+  }
+  try {
+    const encoder = new TextEncoder();
+    const secretBuffer = encoder.encode(secret);
+    const tokenBuffer = encoder.encode(token);
+    return await timingSafeEqual(secretBuffer, tokenBuffer);
+  } catch (e) {
+    console.error('Error in token comparison:', e);
+    return false;
+  }
+};
+
+const validateAuthToken = async (request: Request, secretKey: string): Promise<boolean> => {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) {
+    return false;
+  }
+
+  const token = authHeader.replace('Bearer ', '').trim();
+  return await compareTokens(secretKey, token);
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -971,8 +1008,12 @@ export default {
       case '/webhooks/replicate':
         return handleReplicateWebhook(request, env);
       case '/webhooks/notion': {
-        const notionSignature = request.headers.get('x-notion-signature');
-        if (!notionSignature || notionSignature !== `Bearer ${env.NOTION_SIGNATURE_SECRET}`) {
+        const notionSignature =
+          request.headers.get('x-notion-signature')?.replace('Bearer ', '') || '';
+        if (
+          !env.NOTION_SIGNATURE_SECRET ||
+          !(await compareTokens(env.NOTION_SIGNATURE_SECRET, notionSignature))
+        ) {
           return new Response('Unauthorized', { status: 401 });
         }
         const payload = (await request.json()) as NotionWebhookPayload;
@@ -1039,31 +1080,10 @@ export default {
           message.ack();
           continue;
         }
-<<<<<<< HEAD
 
         // Unknown message type
         console.warn('Unknown message type received:', payload);
         message.ack();
-=======
-        const { imageUrl, pageSlug, blockId } = message.body as ImageUploadMessage;
-        try {
-          await uploadImage(imageUrl, pageSlug, blockId, env, s3);
-          message.ack();
-        } catch (error) {
-          console.error('Error uploading image:', error);
-          if (message.attempts < 3) {
-            message.retry({
-              delaySeconds: 2 ** message.attempts,
-            });
-          } else {
-            console.error(
-              `Failed to upload image after ${message.attempts} attempts:`,
-              message.body,
-            );
-            message.ack();
-          }
-        }
->>>>>>> 3186092 (chore(format): various fixes)
       } catch (error) {
         console.error('Error processing message:', error);
         if (message.attempts < 3) {
