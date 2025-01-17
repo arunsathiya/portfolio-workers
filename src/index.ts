@@ -40,6 +40,7 @@ interface Env {
   DISPATCH_SECRET: string;
   NOTION_QUEUE: Queue<NotionWebhookPayload>;
   NOTION_SIGNATURE_SECRET: string;
+  IMAGE_UPLOAD_QUEUE: Queue<ImageUploadMessage>;
 }
 
 interface CachedSignedUrl {
@@ -448,25 +449,30 @@ const getFileContent = async (path: string, env: Env): Promise<string | null> =>
 
 interface FileChange {
   path: string;
-  content: string;
+  content: string | ArrayBuffer;
 }
 
 const commitToGitHub = async (files: FileChange[], message: string, env: Env): Promise<boolean> => {
-  let hasChanges = false;
-  const additions = [];
-
-  for (const file of files) {
-    const currentContent = await getFileContent(file.path, env);
-    if (currentContent !== file.content) {
-      hasChanges = true;
-      additions.push({
+  const contentChecks = await Promise.all(
+    files.map(async (file) => {
+      const currentContent = await getFileContent(file.path, env);
+      return {
         path: file.path,
-        contents: Buffer.from(file.content).toString('base64'),
-      });
-    }
-  }
+        content: file.content,
+        hasChanged: currentContent !== file.content,
+        addition: {
+          path: file.path,
+          contents: Buffer.from(file.content).toString('base64'),
+        },
+      };
+    }),
+  );
 
-  if (!hasChanges) {
+  const additions = contentChecks
+    .filter((check) => check.hasChanged)
+    .map((check) => check.addition);
+
+  if (additions.length === 0) {
     console.log('No changes detected in any files, skipping commit');
     return false;
   }
@@ -597,6 +603,13 @@ function isParagraphBlock(
   return 'type' in block && block.type === 'paragraph';
 }
 
+interface ImageUploadMessage {
+  imageUrl: string;
+  pageSlug: string;
+  blockId: string;
+  notionPageId: string;
+}
+
 const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const notion = new Client({
     auth: env.NOTION_TOKEN,
@@ -611,8 +624,10 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
     },
   });
 
-  const mdblocks = await n2m.pageToMarkdown(pageId);
-  const page = (await notion.pages.retrieve({ page_id: pageId })) as PageObjectResponse;
+  const [mdblocks, page] = await Promise.all([
+    n2m.pageToMarkdown(pageId),
+    notion.pages.retrieve({ page_id: pageId }) as Promise<PageObjectResponse>,
+  ]);
 
   // Extract page properties
   const title =
@@ -640,14 +655,17 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       if (imageUrl) {
         try {
           const blockId = block.blockId || `fallback-${i}`;
-          const blockObj = (await notion.blocks.retrieve({
-            block_id: blockId,
-          })) as ImageBlockObjectResponse;
-          const caption = blockObj.image?.caption[0]?.plain_text || '';
-          const { key } = await uploadImage(imageUrl, slug, blockId, env, s3);
-          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${caption}" />`;
+          await env.IMAGE_UPLOAD_QUEUE.send({
+            imageUrl,
+            pageSlug: slug,
+            blockId,
+            notionPageId: pageId,
+          });
+          const filename = `${slug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
+          const key = `assets/${filename}`;
+          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="/" />`;
         } catch (error) {
-          console.error(`Failed to upload image: ${imageUrl}`, error);
+          console.error(`Failed to queue image: ${imageUrl}`, error);
         }
       }
     }
@@ -816,6 +834,46 @@ interface QueueMessageBody {
   processAllPages?: boolean;
 }
 
+// Update the isNewPage function to check GitHub repository
+const isNewPage = async (filePath: string, env: Env): Promise<boolean> => {
+  try {
+    // Use the existing getFileContent function to check if the file exists
+    const fileContent = await getFileContent(filePath, env);
+    // If file content is null, the file doesn't exist (new page)
+    return fileContent === null;
+  } catch (error) {
+    console.error('Error checking if page exists in GitHub:', error);
+    // If there's an error checking the file, assume it's new to be safe
+    return true;
+  }
+};
+
+// Add a function to get the default image from your R2 bucket
+const getDefaultImage = async (env: Env, s3Client: S3Client): Promise<ArrayBuffer> => {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: env.R2_BUCKET_NAME,
+      Key: 'sandbox/defaults/index.webp',
+    });
+
+    const response = await s3Client.send(command);
+
+    if (!response.Body) {
+      throw new Error('No image data received');
+    }
+
+    // Convert the readable stream to a buffer
+    const chunks = [];
+    for await (const chunk of response.Body as any) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks).buffer;
+  } catch (error) {
+    console.error('Error getting default image:', error);
+    throw error;
+  }
+};
+
 // Helper function to process Notion webhooks
 const processNotionWebhook = async (
   payload: NotionWebhookPayload,
@@ -845,33 +903,28 @@ const processNotionWebhook = async (
     });
 
     // Process pages in parallel with a concurrency limit
-    const BATCH_SIZE = 5; // Process 5 pages at a time
+    const BATCH_SIZE = 10;
     const fileChanges: FileChange[] = [];
 
     // Process pages in batches to avoid overwhelming the system
     for (let i = 0; i < pages.results.length; i += BATCH_SIZE) {
       const batch = pages.results.slice(i, i + BATCH_SIZE);
-      const batchPromises = batch.map(async (page) => {
-        try {
-          const { content, path } = await processPage(page.id, env, s3);
-          console.log('Processed page:', page.id);
-          return { path, content };
-        } catch (error) {
-          console.error(`Error processing page ${page.id}:`, error);
-          return null;
-        }
-      });
+      const batchResults = await Promise.all(
+        batch.map((page) =>
+          processPage(page.id, env, s3)
+            .then((result) => ({ path: result.path, content: result.content }))
+            .catch((error) => {
+              console.error(`Error processing page ${page.id}:`, error);
+              return null;
+            }),
+        ),
+      );
 
-      // Wait for the current batch to complete
-      const batchResults = await Promise.all(batchPromises);
-
-      // Filter out null results and add to fileChanges
       fileChanges.push(...batchResults.filter((result): result is FileChange => result !== null));
 
-      // Optional: Add a small delay between batches to prevent rate limiting
-      if (i + BATCH_SIZE < pages.results.length) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
+      // Remove the delay between batches
+      // Only add minimal delay if you're hitting rate limits
+      // await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     if (fileChanges.length > 0) {
@@ -888,16 +941,27 @@ const processNotionWebhook = async (
   } else {
     // Process single page as before
     const { content, path } = await processPage(pageId, env, s3);
-    await commitToGitHub(
-      [
-        {
-          path,
-          content,
-        },
-      ],
-      `chore: update ${path}`,
-      env,
-    );
+    const isPageNew = await isNewPage(path, env);
+    const fileChanges: FileChange[] = [
+      {
+        path,
+        content,
+      },
+    ];
+    if (isPageNew) {
+      try {
+        const folderPath = path.substring(0, path.lastIndexOf('/'));
+        const imageBuffer = await getDefaultImage(env, s3);
+        fileChanges.push({
+          path: `${folderPath}/image.webp`,
+          content: imageBuffer,
+        });
+        console.log(`Add default index image for new page: ${folderPath}`);
+      } catch (error) {
+        console.error('Error adding default image:', error);
+      }
+    }
+    await commitToGitHub(fileChanges, `chore: ${isPageNew ? 'create' : 'update'} ${path}`, env);
   }
 
   console.log('Successfully processed Notion webhook for page:', pageId);
@@ -923,14 +987,13 @@ async function processR2Event(event: R2EventMessage, env: Env) {
     }
 
     const arrayBuffer = await r2Object.arrayBuffer();
-    const content = Buffer.from(arrayBuffer).toString('base64');
     const path = `src/content/blog/${dateSlugPart}/image.webp`;
 
     await commitToGitHub(
       [
         {
           path,
-          content,
+          content: arrayBuffer,
         },
       ],
       `chore: update cover image for ${dateSlugPart}`,
@@ -1006,8 +1069,14 @@ export default {
         }
         return handleGitHubDispatch(request, env);
       case '/webhooks/replicate':
+        if (request.method !== 'POST') {
+          return new Response('Method not allowed', { status: 405 });
+        }
         return handleReplicateWebhook(request, env);
       case '/webhooks/notion': {
+        if (request.method !== 'POST') {
+          return new Response('Method not allowed', { status: 405 });
+        }
         const notionSignature =
           request.headers.get('x-notion-signature')?.replace('Bearer ', '') || '';
         if (
@@ -1023,21 +1092,27 @@ export default {
           'x-notion-signature': notionSignature,
         };
         const processAllPages = request.headers.has('x-process-all-pages');
+        ctx.waitUntil(
+          processNotionWebhook(
+            payload,
+            {
+              headers: relevantHeaders || {},
+              processAllPages: processAllPages || false,
+            },
+            env,
+          ).catch((error) => {
+            console.error('Error processing Notion webhook:', error);
+          }),
+        );
 
-        await env.NOTION_QUEUE.send({
-          type: 'notion',
-          payload,
-          headers: relevantHeaders,
-          processAllPages,
-        });
-
+        // Immediately return response
         return new Response(
           JSON.stringify({
             status: 'accepted',
-            message: 'Webhook received and queued for processing',
+            message: 'Webhook received and will be processed asynchronously',
           }),
           {
-            status: 200,
+            status: 202, // Using 202 Accepted to indicate async processing
             headers: { 'Content-Type': 'application/json' },
           },
         );
@@ -1048,28 +1123,14 @@ export default {
   },
 
   async queue(
-    batch: MessageBatch<QueueMessageBody>,
+    batch: MessageBatch<QueueMessageBody | ImageUploadMessage>,
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
+    const s3 = createS3Client(env);
     for (const message of batch.messages) {
       try {
-        const { type, payload, headers, processAllPages } = message.body;
-
-        // Handle Notion webhook messages
-        if (type === 'notion' && isNotionWebhookPayload(payload)) {
-          await processNotionWebhook(
-            payload,
-            {
-              headers: headers || {},
-              processAllPages: processAllPages || false,
-            },
-            env,
-          );
-          message.ack();
-          continue;
-        }
-
+        const payload = message.body;
         // Handle R2 events
         if (
           isR2Event(payload) &&
