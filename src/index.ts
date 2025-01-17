@@ -834,6 +834,46 @@ interface QueueMessageBody {
   processAllPages?: boolean;
 }
 
+// Update the isNewPage function to check GitHub repository
+const isNewPage = async (filePath: string, env: Env): Promise<boolean> => {
+  try {
+    // Use the existing getFileContent function to check if the file exists
+    const fileContent = await getFileContent(filePath, env);
+    // If file content is null, the file doesn't exist (new page)
+    return fileContent === null;
+  } catch (error) {
+    console.error('Error checking if page exists in GitHub:', error);
+    // If there's an error checking the file, assume it's new to be safe
+    return true;
+  }
+};
+
+// Add a function to get the default image from your R2 bucket
+const getDefaultImage = async (env: Env, s3Client: S3Client): Promise<ArrayBuffer> => {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: env.R2_BUCKET_NAME,
+      Key: 'sandbox/defaults/index.webp',
+    });
+
+    const response = await s3Client.send(command);
+
+    if (!response.Body) {
+      throw new Error('No image data received');
+    }
+
+    // Convert the readable stream to a buffer
+    const chunks = [];
+    for await (const chunk of response.Body as any) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks).buffer;
+  } catch (error) {
+    console.error('Error getting default image:', error);
+    throw error;
+  }
+};
+
 // Helper function to process Notion webhooks
 const processNotionWebhook = async (
   payload: NotionWebhookPayload,
@@ -901,16 +941,27 @@ const processNotionWebhook = async (
   } else {
     // Process single page as before
     const { content, path } = await processPage(pageId, env, s3);
-    await commitToGitHub(
-      [
-        {
-          path,
-          content,
-        },
-      ],
-      `chore: update ${path}`,
-      env,
-    );
+    const isPageNew = await isNewPage(path, env);
+    const fileChanges: FileChange[] = [
+      {
+        path,
+        content,
+      },
+    ];
+    if (isPageNew) {
+      try {
+        const folderPath = path.substring(0, path.lastIndexOf('/'));
+        const imageBuffer = await getDefaultImage(env, s3);
+        fileChanges.push({
+          path: `${folderPath}/image.webp`,
+          content: Buffer.from(imageBuffer).toString('base64'),
+        });
+        console.log(`Add default index image for new page: ${folderPath}`);
+      } catch (error) {
+        console.error('Error adding default image:', error);
+      }
+    }
+    await commitToGitHub(fileChanges, `chore: ${isPageNew ? 'create' : 'update'} ${path}`, env);
   }
 
   console.log('Successfully processed Notion webhook for page:', pageId);
