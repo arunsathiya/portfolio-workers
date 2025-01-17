@@ -705,10 +705,12 @@ pubDate: '${pubDate}'
 updatedDate: '${updatedDate}'
 tags: ${JSON.stringify(tags)}
 coverImage: "./image.webp"
----
-
-${postContainsImages ? `import R2Image from 'src/components/R2Image.astro';` : ''}
-
+---${
+    postContainsImages
+      ? `
+import R2Image from 'src/components/R2Image.astro';`
+      : ''
+  }
 ${convertedMdString.replace(/\n\n/g, '\n')}`;
 
   return {
