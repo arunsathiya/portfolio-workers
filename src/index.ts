@@ -670,7 +670,8 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
           const blockId = block.blockId || `fallback-${i}`;
           const filename = `${slug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
           const key = `assets/${filename}`;
-          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="/" />`;
+          const existingCaption = block.parent.match(/alt="([^"]*)"/)?.[1];
+          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="${existingCaption || '/'}" />`;
           await env.IMAGE_UPLOAD_QUEUE.send({
             type: 'image-processing',
             payload: {
