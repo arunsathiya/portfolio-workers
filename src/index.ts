@@ -449,7 +449,7 @@ const getFileContent = async (path: string, env: Env): Promise<string | null> =>
 
 interface FileChange {
   path: string;
-  content: string;
+  content: string | ArrayBuffer;
 }
 
 const commitToGitHub = async (files: FileChange[], message: string, env: Env): Promise<boolean> => {
@@ -954,7 +954,7 @@ const processNotionWebhook = async (
         const imageBuffer = await getDefaultImage(env, s3);
         fileChanges.push({
           path: `${folderPath}/image.webp`,
-          content: Buffer.from(imageBuffer).toString('base64'),
+          content: imageBuffer,
         });
         console.log(`Add default index image for new page: ${folderPath}`);
       } catch (error) {
