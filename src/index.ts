@@ -750,14 +750,14 @@ const processImageMessage = async (message: ImageProcessingPayload, env: Env) =>
       throw new Error('MDX file not found');
     }
 
-    // Replace the placeholder with the captioned version
-    const oldImageTag = `<R2Image imageKey="${key}" alt="/" />`;
-    const newImageTag = `<R2Image imageKey="${key}" alt="${caption}" />`;
+    const imageTagRegex = new RegExp(`<R2Image imageKey="${key}" alt="([^"]*)" />`);
+    const currentCaption = currentContent.match(imageTagRegex)?.[1];
 
-    if (currentContent.includes(oldImageTag)) {
-      const newContent = currentContent.replace(oldImageTag, newImageTag);
-
-      // Commit the updated content
+    if (currentCaption !== caption) {
+      const newContent = currentContent.replace(
+        `<R2Image imageKey="${key}" alt="${currentCaption}" />`,
+        `<R2Image imageKey="${key}" alt="${caption}" />`,
+      );
       await commitToGitHub(
         [
           {
