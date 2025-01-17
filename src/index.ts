@@ -987,14 +987,13 @@ async function processR2Event(event: R2EventMessage, env: Env) {
     }
 
     const arrayBuffer = await r2Object.arrayBuffer();
-    const content = Buffer.from(arrayBuffer).toString('base64');
     const path = `src/content/blog/${dateSlugPart}/image.webp`;
 
     await commitToGitHub(
       [
         {
           path,
-          content,
+          content: arrayBuffer,
         },
       ],
       `chore: update cover image for ${dateSlugPart}`,
@@ -1131,42 +1130,21 @@ export default {
     const s3 = createS3Client(env);
     for (const message of batch.messages) {
       try {
-        if ('type' in message.body) {
-          const { type, payload, headers, processAllPages } = message.body;
-
-          // Handle R2 events
-          if (
-            isR2Event(payload) &&
-            payload.action === 'CopyObject' &&
-            payload.object.key.endsWith('image.webp')
-          ) {
-            await processR2Event(payload, env);
-            message.ack();
-            continue;
-          }
-
-          // Unknown message type
-          console.warn('Unknown message type received:', payload);
+        const payload = message.body;
+        // Handle R2 events
+        if (
+          isR2Event(payload) &&
+          payload.action === 'CopyObject' &&
+          payload.object.key.endsWith('image.webp')
+        ) {
+          await processR2Event(payload, env);
           message.ack();
+          continue;
         }
-        const { imageUrl, pageSlug, blockId } = message.body as ImageUploadMessage;
-        try {
-          await uploadImage(imageUrl, pageSlug, blockId, env, s3);
-          message.ack();
-        } catch (error) {
-          console.error('Error uploading image:', error);
-          if (message.attempts < 3) {
-            message.retry({
-              delaySeconds: 2 ** message.attempts,
-            });
-          } else {
-            console.error(
-              `Failed to upload image after ${message.attempts} attempts:`,
-              message.body,
-            );
-            message.ack();
-          }
-        }
+
+        // Unknown message type
+        console.warn('Unknown message type received:', payload);
+        message.ack();
       } catch (error) {
         console.error('Error processing message:', error);
         if (message.attempts < 3) {
