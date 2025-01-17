@@ -40,7 +40,7 @@ interface Env {
   DISPATCH_SECRET: string;
   NOTION_QUEUE: Queue<NotionWebhookPayload>;
   NOTION_SIGNATURE_SECRET: string;
-  IMAGE_UPLOAD_QUEUE: Queue<ImageUploadMessage>;
+  IMAGE_UPLOAD_QUEUE: Queue<ImageProcessingMessage>;
 }
 
 interface CachedSignedUrl {
@@ -603,13 +603,6 @@ function isParagraphBlock(
   return 'type' in block && block.type === 'paragraph';
 }
 
-interface ImageUploadMessage {
-  imageUrl: string;
-  pageSlug: string;
-  blockId: string;
-  notionPageId: string;
-}
-
 const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const notion = new Client({
     auth: env.NOTION_TOKEN,
@@ -647,33 +640,6 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       ? page.properties.Description.rich_text[0]?.plain_text.trim()
       : '';
 
-  // Process images in the markdown blocks
-  for (let i = 0; i < mdblocks.length; i++) {
-    const block = mdblocks[i];
-    if (block.type === 'image') {
-      const imageUrl = block.parent.match(/\((.*?)\)/)?.[1];
-      if (imageUrl) {
-        try {
-          const blockId = block.blockId || `fallback-${i}`;
-          await env.IMAGE_UPLOAD_QUEUE.send({
-            imageUrl,
-            pageSlug: slug,
-            blockId,
-            notionPageId: pageId,
-          });
-          const filename = `${slug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
-          const key = `assets/${filename}`;
-          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="/" />`;
-        } catch (error) {
-          console.error(`Failed to queue image: ${imageUrl}`, error);
-        }
-      }
-    }
-  }
-
-  const mdString = n2m.toMarkdownString(mdblocks);
-  const convertedMdString = mdString.parent.replace(/\[(embed|video)\]\((https?:\/\/\S+)\)/g, '$2');
-
   // Get dates
   const pubDate =
     page.properties.Date?.type === 'date' && page.properties.Date.date?.start
@@ -693,6 +659,38 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
     page.properties.Date?.type === 'date' && page.properties.Date.date?.start
       ? formatDateForFolder(page.properties.Date.date.start)
       : formatDateForFolder(page.created_time);
+
+  // Process images in the markdown blocks
+  for (let i = 0; i < mdblocks.length; i++) {
+    const block = mdblocks[i];
+    if (block.type === 'image') {
+      const imageUrl = block.parent.match(/\((.*?)\)/)?.[1];
+      if (imageUrl) {
+        try {
+          const blockId = block.blockId || `fallback-${i}`;
+          const filename = `${slug}-${blockId}${path.extname(imageUrl.split('?')[0])}`;
+          const key = `assets/${filename}`;
+          mdblocks[i].parent = `<R2Image imageKey="${key}" alt="/" />`;
+          await env.IMAGE_UPLOAD_QUEUE.send({
+            type: 'image-processing',
+            payload: {
+              type: 'image-processing',
+              imageUrl,
+              pageSlug: slug,
+              blockId,
+              notionPageId: pageId,
+              filePath: `src/content/blog/${folderDate}-${slug}/index.mdx`,
+            },
+          });
+        } catch (error) {
+          console.error(`Failed to queue image: ${imageUrl}`, error);
+        }
+      }
+    }
+  }
+
+  const mdString = n2m.toMarkdownString(mdblocks);
+  const convertedMdString = mdString.parent.replace(/\[(embed|video)\]\((https?:\/\/\S+)\)/g, '$2');
 
   const postContainsImages = mdblocks.some((block) => block.parent.includes('R2Image'));
 
@@ -717,6 +715,63 @@ ${convertedMdString.replace(/\n\n/g, '\n')}`;
     content,
     path: `src/content/blog/${folderDate}-${slug}/index.mdx`,
   };
+};
+
+const processImageMessage = async (message: ImageProcessingPayload, env: Env) => {
+  const notion = new Client({
+    auth: env.NOTION_TOKEN,
+    notionVersion: '2022-06-28',
+    fetch: (input, init) => fetch(input, init),
+  });
+
+  try {
+    // Get the block and its caption
+    const blockObj = (await notion.blocks.retrieve({
+      block_id: message.blockId,
+    })) as ImageBlockObjectResponse;
+
+    const caption = blockObj.image?.caption[0]?.plain_text || '';
+    const filename = `${message.pageSlug}-${message.blockId}${path.extname(message.imageUrl.split('?')[0])}`;
+    const key = `assets/${filename}`;
+
+    // First upload the image if needed
+    await uploadImage(
+      message.imageUrl,
+      message.pageSlug,
+      message.blockId,
+      env,
+      createS3Client(env),
+    );
+
+    // Then update the MDX file with the caption
+    const currentContent = await getFileContent(message.filePath, env);
+    if (!currentContent) {
+      throw new Error('MDX file not found');
+    }
+
+    // Replace the placeholder with the captioned version
+    const oldImageTag = `<R2Image imageKey="${key}" alt="/" />`;
+    const newImageTag = `<R2Image imageKey="${key}" alt="${caption}" />`;
+
+    if (currentContent.includes(oldImageTag)) {
+      const newContent = currentContent.replace(oldImageTag, newImageTag);
+
+      // Commit the updated content
+      await commitToGitHub(
+        [
+          {
+            path: message.filePath,
+            content: newContent,
+          },
+        ],
+        `chore: update image caption for ${message.pageSlug}`,
+        env,
+      );
+    }
+  } catch (error) {
+    console.error('Error processing image:', error);
+    throw error; // Allow retry logic to handle the error
+  }
 };
 
 const uploadImage = async (
@@ -828,10 +883,26 @@ interface NotionWebhookContext {
   processAllPages: boolean;
 }
 
+// The inner payload structure
+interface ImageProcessingPayload {
+  type: 'image-processing';
+  imageUrl: string;
+  pageSlug: string;
+  blockId: string;
+  notionPageId: string;
+  filePath: string;
+}
+
+// The full message structure
+interface ImageProcessingMessage {
+  type: 'image-processing';
+  payload: ImageProcessingPayload;
+}
+
 // Updated type definitions
 interface QueueMessageBody {
-  type: 'notion' | 'r2';
-  payload: NotionWebhookPayload | R2EventMessage;
+  type: 'notion' | 'r2' | 'image-processing';
+  payload: NotionWebhookPayload | R2EventMessage | ImageProcessingPayload;
   headers?: Record<string, string>;
   processAllPages?: boolean;
 }
@@ -1125,7 +1196,7 @@ export default {
   },
 
   async queue(
-    batch: MessageBatch<QueueMessageBody | ImageUploadMessage>,
+    batch: MessageBatch<QueueMessageBody | ImageProcessingMessage>,
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
@@ -1133,6 +1204,11 @@ export default {
     for (const message of batch.messages) {
       try {
         const payload = message.body;
+        if (payload.type === 'image-processing') {
+          await processImageMessage(payload.payload as ImageProcessingPayload, env);
+          message.ack();
+          continue;
+        }
         // Handle R2 events
         if (
           isR2Event(payload) &&
