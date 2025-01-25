@@ -1131,6 +1131,11 @@ export default {
       return handleAssets(request, env, s3Client);
     }
 
+    if (url.pathname.startsWith('/blog/')) {
+      const newPath = url.pathname.replace('/blog/', '/');
+      return Response.redirect(url.origin + newPath, 301);
+    }
+
     switch (url.pathname) {
       case '/api/generate-image':
         if (request.method !== 'POST') {
