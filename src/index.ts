@@ -1127,13 +1127,6 @@ export default {
     const url = new URL(request.url);
     const s3Client = createS3Client(env);
 
-    if (url.pathname === '/rss.xml') {
-      const userAgent = request.headers.get('user-agent');
-      console.log('RSS feed accessed with user agent:', userAgent);
-      const response = await fetch(new URL('/rss.xml', url.origin), request);
-      return response;
-    }
-
     if (url.pathname.startsWith('/assets/')) {
       return handleAssets(request, env, s3Client);
     }
