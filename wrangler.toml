@@ -10,12 +10,14 @@ routes = [
     { pattern = "arun.blog/api/generate-image", zone_name = "arun.blog" },
     { pattern = "arun.blog/webhooks/replicate*", zone_name = "arun.blog" },
     { pattern = "arun.blog/webhooks/notion", zone_name = "arun.blog" },
+    { pattern = "arun.blog/rss.xml", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/assets/*", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/blog/*", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/api/dispatch", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/api/generate-image", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/webhooks/replicate*", zone_name = "arun.blog" },
     { pattern = "www.arun.blog/webhooks/notion", zone_name = "arun.blog" },
+	{ pattern = "www.arun.blog/rss.xml", zone_name = "arun.blog" },
 ]
 
 # Automatically place your workloads in an optimal location to minimize latency.
