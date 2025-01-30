@@ -695,14 +695,14 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const postContainsImages = mdblocks.some((block) => block.parent.includes('R2Image'));
 
   const content = `---
-title: "${title}"
-seoTitle: "${title}"
-slug: "${slug}"
-description: "${description}"
+title: '${title}'
+seoTitle: '${title}'
+slug: '${slug}'
+description: '${description}'
 pubDate: '${pubDate}'
 updatedDate: '${updatedDate}'
 tags: ${JSON.stringify(tags)}
-coverImage: "./image.webp"
+coverImage: './image.webp'
 ---${
     postContainsImages
       ? `
