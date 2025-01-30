@@ -691,8 +691,9 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   }
 
   const mdString = n2m.toMarkdownString(mdblocks);
+  console.log(`mdstring`, mdString)
   const convertedMdString = mdString.parent.replace(/\[(embed|video)\]\((https?:\/\/\S+)\)/g, '$2');
-
+  console.log(`convertedmdstring`, convertedMdString)
   const postContainsImages = mdblocks.some((block) => block.parent.includes('R2Image'));
 
   const content = `---
@@ -710,7 +711,7 @@ coverImage: "./image.webp"
 import R2Image from 'src/components/R2Image.astro';`
       : ''
   }
-${convertedMdString.replace(/\n\n/g, '\n')}`;
+${convertedMdString}`;
 
   return {
     content,
