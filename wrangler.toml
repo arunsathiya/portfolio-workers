@@ -88,6 +88,13 @@ routes = [
 binding = "BlogAssets"
 id = "b1c34589814240cfa24050edb1dd028d"
 
+[[kv_namespaces]]
+binding = "BLOG_TAGS"
+id = "2476a2f9522c4281872631ca59caa872"
+
+[triggers]
+crons = ["*/3 * * * *"]
+
 # Bind an mTLS certificate. Use to present a client certificate when communicating with another service.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#mtls-certificates
 # [[mtls_certificates]]

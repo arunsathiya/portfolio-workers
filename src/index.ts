@@ -32,6 +32,7 @@ interface Env {
   IMAGE_GENERATION_SECRET: string;
   IMAGE_GENERATION_BASE_PROMPT: string;
   BlogAssets: KVNamespace;
+  BLOG_TAGS: KVNamespace;
   PORTFOLIO_BUCKET: R2Bucket;
   ANTHROPIC_API_KEY: string;
   NOTION_TOKEN: string;
@@ -1121,6 +1122,52 @@ const validateAuthToken = async (request: Request, secretKey: string): Promise<b
   return await compareTokens(secretKey, token);
 };
 
+interface NotionTag {
+  id: string;
+  name: string;
+  color: string;
+}
+
+const fetchAndStoreNotionTags = async (env: Env) => {
+  const notion = new Client({
+    auth: env.NOTION_TOKEN,
+    notionVersion: '2022-06-28',
+    fetch: (input, init) => fetch(input, init),
+  });
+
+  try {
+    // Fetch database metadata which includes tag options
+    const response = await notion.databases.retrieve({ 
+      database_id: env.NOTION_DATABASE_ID 
+    });
+
+    // Extract tags from the multi-select property
+    const tagsProperty = Object.values(response.properties).find(
+      prop => prop.type === 'multi_select'
+    ) as { type: 'multi_select', multi_select: { options: NotionTag[] } };
+
+    if (!tagsProperty || !tagsProperty.multi_select?.options) {
+      console.error('No multi-select tags property found in database');
+      return;
+    }
+
+    const tags = tagsProperty.multi_select.options;
+
+    // Store tags in KV
+    await env.BLOG_TAGS.put('tags', JSON.stringify(tags), {
+      // Cache for 1 hour
+      expirationTtl: 3600
+    });
+
+    console.log(`Successfully stored ${tags.length} tags in KV`);
+    return tags;
+
+  } catch (error) {
+    console.error('Error fetching or storing Notion tags:', error);
+    throw error;
+  }
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -1248,5 +1295,9 @@ export default {
         }
       }
     }
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(fetchAndStoreNotionTags(env));
   },
 } satisfies ExportedHandler<Env>;
