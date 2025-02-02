@@ -93,7 +93,7 @@ binding = "BLOG_TAGS"
 id = "2476a2f9522c4281872631ca59caa872"
 
 [triggers]
-crons = ["*/3 * * * *"]
+crons = ["0 */1 * * *"]
 
 # Bind an mTLS certificate. Use to present a client certificate when communicating with another service.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#mtls-certificates
