@@ -1134,6 +1134,11 @@ export default {
       const newPath = url.pathname.replace('/blog/', '/');
       return Response.redirect(url.origin + newPath, 301);
     }
+    
+    if (url.pathname.startsWith('/post/')) {
+      const newPath = url.pathname.replace('/post/', '/');
+      return Response.redirect(url.origin + newPath, 301);
+    }
 
     switch (url.pathname) {
       case '/api/generate-image':
