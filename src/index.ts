@@ -1187,6 +1187,16 @@ export default {
       return Response.redirect(url.origin + newPath, 301);
     }
 
+    if (url.pathname.startsWith('/tags')) {
+      const tagsJson: string | null = await env.BLOG_TAGS.get('tags');
+      const tags: NotionTag[] = tagsJson ? JSON.parse(tagsJson) : [];
+      const tag = url.pathname.split("/")[2]
+      const tagExists = tags.some(t => t.name.toLowerCase() === tag.toLowerCase())
+      if (!tagExists) {
+        return Response.redirect(`${url.origin}/tags`, 301);
+      }
+    }
+
     switch (url.pathname) {
       case '/api/generate-image':
         if (request.method !== 'POST') {
