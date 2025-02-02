@@ -604,6 +604,10 @@ function isParagraphBlock(
   return 'type' in block && block.type === 'paragraph';
 }
 
+const escapeYamlString = (str: string) => {
+  return str.replace(/'/g, "''");
+};
+
 const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const notion = new Client({
     auth: env.NOTION_TOKEN,
@@ -696,10 +700,10 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const postContainsImages = mdblocks.some((block) => block.parent.includes('R2Image'));
 
   const content = `---
-title: '${title}'
-seoTitle: '${title}'
-slug: '${slug}'
-description: '${description}'
+title: '${escapeYamlString(title)}'
+seoTitle: '${escapeYamlString(title)}'
+slug: '${escapeYamlString(slug)}'
+description: '${escapeYamlString(description)}'
 pubDate: '${pubDate}'
 updatedDate: '${updatedDate}'
 tags: ${JSON.stringify(tags)}
