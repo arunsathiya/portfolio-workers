@@ -1284,7 +1284,11 @@ const updatePageLinks = async (pageId: string, notion: Client): Promise<void> =>
     if (isParagraphBlock(block)) {
       let isBlockModified = false;
       const updatedRichText = block.paragraph.rich_text.map((textBlock) => {
-        if (isTextRichTextItem(textBlock) && textBlock.text.link?.url.includes('arun.blog/blog/')) {
+        if (isTextRichTextItem(textBlock) && (
+          textBlock.text.link?.url.includes('arun.blog/blog/') ||
+          textBlock.text.link?.url.includes('arun.blog/post/') ||
+          textBlock.text.link?.url.includes('arun.blog/tag/')
+        )) {
           isBlockModified = true;
           return {
             type: 'text',
