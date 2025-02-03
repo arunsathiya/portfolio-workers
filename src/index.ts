@@ -1172,6 +1172,104 @@ const fetchAndStoreNotionTags = async (env: Env) => {
   }
 };
 
+interface CoverOption {
+  type: 'solid' | 'gradient';
+  color?: string;
+  number?: string;
+}
+
+const getRandomCover = (): { type: 'external'; external: { url: string } } => {
+  const coverOptions: CoverOption[] = [
+    { type: 'solid', color: 'red' },
+    { type: 'solid', color: 'blue' },
+    { type: 'solid', color: 'yellow' },
+    { type: 'gradient', number: '8' },
+    { type: 'gradient', number: '4' },
+    { type: 'gradient', number: '2' },
+  ];
+
+  const randomCover = coverOptions[Math.floor(Math.random() * coverOptions.length)];
+  const getCoverUrl = (cover: CoverOption) => {
+    if (cover.type === 'solid') {
+      return `https://www.notion.so/images/page-cover/solid_${cover.color}.png`;
+    } else {
+      return `https://www.notion.so/images/page-cover/gradients_${cover.number}.png`;
+    }
+  };
+
+  return {
+    type: 'external',
+    external: {
+      url: getCoverUrl(randomCover),
+    },
+  };
+};
+
+const updateAllPageCoversAndIcons = async (env: Env): Promise<void> => {
+  const notion = new Client({
+    auth: env.NOTION_TOKEN,
+    notionVersion: '2022-06-28',
+    fetch: (input, init) => fetch(input, init),
+  });
+
+  try {
+    const databaseQuery = await notion.databases.query({
+      database_id: env.NOTION_DATABASE_ID,
+      page_size: 100,
+    });
+
+    // Process pages in batches to avoid rate limits
+    const BATCH_SIZE = 5;
+    const pages = databaseQuery.results;
+
+    for (let i = 0; i < pages.length; i += BATCH_SIZE) {
+      const batch = pages.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (page) => {
+          try {
+            // Retrieve current page
+            const currentPage = await notion.pages.retrieve({ page_id: page.id });
+            const updates: any = {};
+            
+            // Only update if missing cover or icon
+            if (!currentPage.cover) {
+              updates.cover = getRandomCover();
+            }
+            
+            if (!currentPage.icon) {
+              updates.icon = {
+                type: 'emoji',
+                emoji: '🚀',
+              };
+            }
+
+            // Only update if needed
+            if (Object.keys(updates).length > 0) {
+              await notion.pages.update({
+                page_id: page.id,
+                ...updates,
+              });
+              console.log(`Updated page ${page.id} with ${Object.keys(updates).join(' and ')}`);
+            }
+          } catch (error) {
+            console.error(`Failed to update page ${page.id}:`, error);
+          }
+        })
+      );
+
+      // Add a small delay between batches
+      if (i + BATCH_SIZE < pages.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    console.log('Successfully processed all pages');
+  } catch (error) {
+    console.error('Error updating pages:', error);
+    throw error;
+  }
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -1312,6 +1410,14 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(fetchAndStoreNotionTags(env));
+    switch (event.cron) {
+      case "* */1 * * *":
+        await fetchAndStoreNotionTags(env);
+        break;
+      case "*/3 * * * *":
+        await updateAllPageCoversAndIcons(env);
+        break;
+    }
+    console.log("cron processed");
   },
 } satisfies ExportedHandler<Env>;
