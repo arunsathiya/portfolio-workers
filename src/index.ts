@@ -8,7 +8,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import Replicate, { ApiError, validateWebhook } from 'replicate';
 import Anthropic from '@anthropic-ai/sdk';
-import { Client } from '@notionhq/client';
+import { Client, isFullPage } from '@notionhq/client';
 
 import { Buffer } from 'node:buffer';
 import {
@@ -1229,6 +1229,11 @@ const updateAllPageCoversAndIcons = async (env: Env): Promise<void> => {
           try {
             // Retrieve current page
             const currentPage = await notion.pages.retrieve({ page_id: page.id });
+            if (!isFullPage(currentPage)) {
+              console.log(`Skipping page ${page.id} - not a full page object`)
+              return
+            }
+
             const updates: any = {};
             
             // Only update if missing cover or icon
