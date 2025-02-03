@@ -1275,6 +1275,121 @@ const updateAllPageCoversAndIcons = async (env: Env): Promise<void> => {
   }
 };
 
+const updatePageLinks = async (pageId: string, notion: Client): Promise<void> => {
+  const blocks = await notion.blocks.children.list({
+    block_id: pageId,
+  });
+
+  for (const block of blocks.results) {
+    if (isParagraphBlock(block)) {
+      let isBlockModified = false;
+      const updatedRichText = block.paragraph.rich_text.map((textBlock) => {
+        if (isTextRichTextItem(textBlock) && textBlock.text.link?.url.includes('arun.blog/blog/')) {
+          isBlockModified = true;
+          return {
+            type: 'text',
+            text: {
+              content: textBlock.text.content,
+              link: {
+                url: textBlock.text.link.url
+                  .replace(new RegExp('arun.blog/blog/', 'g'), 'arun.blog/')
+                  .replace(new RegExp('arun.blog/post/', 'g'), 'arun.blog/')
+                  .replace(/\/tag\//, '/tags/'),
+              },
+            },
+            annotations: textBlock.annotations,
+          };
+        }
+        return textBlock;
+      });
+
+      if (isBlockModified) {
+        try {
+          await notion.blocks.update({
+            block_id: block.id,
+            type: 'paragraph',
+            paragraph: {
+              rich_text: updatedRichText,
+            },
+          } as UpdateBlockParameters);
+          console.log(`Updated block ${block.id}`);
+        } catch (error) {
+          console.error(`Error updating block ${block.id}:`, error);
+          throw error;
+        }
+      }
+    }
+  }
+};
+
+const handleLinkUpdates = async (request: Request, env: Env): Promise<Response> => {
+  // Check authentication
+  if (!env.DISPATCH_SECRET || !(await validateAuthToken(request, env.DISPATCH_SECRET))) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  const notion = new Client({
+    auth: env.NOTION_TOKEN,
+    notionVersion: '2022-06-28',
+    fetch: (input, init) => fetch(input, init),
+  });
+
+  try {
+    // Query all pages in the database
+    const databaseQuery = await notion.databases.query({
+      database_id: env.NOTION_DATABASE_ID,
+      page_size: 100, // Adjust based on your needs
+    });
+
+    // Process pages in batches
+    const BATCH_SIZE = 5;
+    const pages = databaseQuery.results;
+    const results = {
+      processed: 0,
+      errors: [] as string[],
+    };
+
+    for (let i = 0; i < pages.length; i += BATCH_SIZE) {
+      const batch = pages.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (page) => {
+          try {
+            await updatePageLinks(page.id, notion);
+            results.processed++;
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            results.errors.push(`Error processing page ${page.id}: ${errorMessage}`);
+          }
+        })
+      );
+
+      // Add a small delay between batches to respect rate limits
+      if (i + BATCH_SIZE < pages.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    return new Response(JSON.stringify({
+      status: 'success',
+      message: `Processed ${results.processed} pages`,
+      errors: results.errors.length > 0 ? results.errors : undefined,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    console.error('Error processing link updates:', error);
+    return new Response(JSON.stringify({
+      status: 'error',
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -1282,6 +1397,13 @@ export default {
 
     if (url.pathname.startsWith('/assets/')) {
       return handleAssets(request, env, s3Client);
+    }
+
+    if (url.pathname === "/api/changes-on-notion") {
+      if (request.method !== "POST") {
+        return new Response(`Method not allowed`, {status: 405})
+      }
+      return handleLinkUpdates(request, env)
     }
 
     if (url.pathname.startsWith('/blog/')) {
