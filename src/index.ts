@@ -1411,10 +1411,10 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     switch (event.cron) {
-      case "* */1 * * *":
+      case "0 */1 * * *":
         await fetchAndStoreNotionTags(env);
         break;
-      case "*/3 * * * *":
+      case "*/10 * * * *":
         await updateAllPageCoversAndIcons(env);
         break;
     }

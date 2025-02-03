@@ -94,8 +94,8 @@ id = "2476a2f9522c4281872631ca59caa872"
 
 [triggers]
 crons = [
-    "* */1 * * *",
-    "*/3 * * * *"
+    "0 */1 * * *",
+    "*/10 * * * *"
 ]
 
 # Bind an mTLS certificate. Use to present a client certificate when communicating with another service.
