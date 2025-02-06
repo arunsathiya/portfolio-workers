@@ -1432,25 +1432,70 @@ const findClosestSlug = (requestedSlug: string, currentSlugs: string[]): string 
 
   for (const slug of currentSlugs) {
     const slugKeywords = extractKeywords(slug);
-    const matchCount = countMatchedKeywords(requestedKeywords, slugKeywords);
+    const matchResult = evaluateMatch(requestedKeywords, slugKeywords);
     
-    // Adjust scoring for single-word searches
-    const score = requestedKeywords.length === 1 
-      ? matchCount > 0 ? 1 : 0  // Full score if any match for single-word searches
-      : matchCount / Math.max(requestedKeywords.length, slugKeywords.length);
-
-    if (score > bestMatch.score) {
+    if (matchResult.score > bestMatch.score) {
       bestMatch = {
         slug,
-        score,
-        matchedKeywords: matchCount
+        score: matchResult.score,
+        matchedKeywords: matchResult.matches
       };
     }
   }
 
-  // Lower threshold (0.3) for single-word searches
-  const threshold = requestedKeywords.length === 1 ? 0.3 : 0.5;
+  // More lenient threshold for multi-word searches
+  const threshold = requestedKeywords.length === 1 ? 0.3 : 0.4;
   return bestMatch.score >= threshold ? bestMatch.slug : null;
+};
+
+const evaluateMatch = (searchWords: string[], targetWords: string[]) => {
+  let matches = 0;
+  let partialMatches = 0;
+
+  for (const searchWord of searchWords) {
+    let bestWordScore = 0;
+
+    for (const targetWord of targetWords) {
+      // Exact match
+      if (searchWord === targetWord) {
+        bestWordScore = 1;
+        break;
+      }
+
+      // Partial match with minimum length
+      if (searchWord.length >= 4 && targetWord.length >= 4) {
+        // One contains the other
+        if (searchWord.includes(targetWord) || targetWord.includes(searchWord)) {
+          bestWordScore = Math.max(bestWordScore, 0.8);
+          continue;
+        }
+
+        // Levenshtein-like similarity for typos
+        const similarity = calculateSimilarity(searchWord, targetWord);
+        bestWordScore = Math.max(bestWordScore, similarity);
+      }
+    }
+
+    if (bestWordScore >= 0.8) matches++;
+    else if (bestWordScore >= 0.5) partialMatches++;
+  }
+
+  return {
+    matches,
+    score: (matches + partialMatches * 0.5) / Math.max(searchWords.length, 2)
+  };
+};
+
+const calculateSimilarity = (str1: string, str2: string): number => {
+  // Simple character-based similarity
+  const maxLength = Math.max(str1.length, str2.length);
+  let matches = 0;
+  
+  for (let i = 0; i < Math.min(str1.length, str2.length); i++) {
+    if (str1[i] === str2[i]) matches++;
+  }
+  
+  return matches / maxLength;
 };
 
 const extractKeywords = (slug: string): string[] => {
