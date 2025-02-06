@@ -1433,7 +1433,11 @@ const findClosestSlug = (requestedSlug: string, currentSlugs: string[]): string 
   for (const slug of currentSlugs) {
     const slugKeywords = extractKeywords(slug);
     const matchCount = countMatchedKeywords(requestedKeywords, slugKeywords);
-    const score = matchCount / Math.max(requestedKeywords.length, slugKeywords.length);
+    
+    // Adjust scoring for single-word searches
+    const score = requestedKeywords.length === 1 
+      ? matchCount > 0 ? 1 : 0  // Full score if any match for single-word searches
+      : matchCount / Math.max(requestedKeywords.length, slugKeywords.length);
 
     if (score > bestMatch.score) {
       bestMatch = {
@@ -1444,7 +1448,9 @@ const findClosestSlug = (requestedSlug: string, currentSlugs: string[]): string 
     }
   }
 
-  return bestMatch.score >= 0.5 ? bestMatch.slug : null;
+  // Lower threshold (0.3) for single-word searches
+  const threshold = requestedKeywords.length === 1 ? 0.3 : 0.5;
+  return bestMatch.score >= threshold ? bestMatch.slug : null;
 };
 
 const extractKeywords = (slug: string): string[] => {
