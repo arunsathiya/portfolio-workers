@@ -1435,7 +1435,21 @@ export default {
         if (request.method !== 'POST') {
           return new Response('Method not allowed', { status: 405 });
         }
-        return handleImageGeneration(request, env);
+        ctx.waitUntil(
+          handleImageGeneration(request, env).catch((error) => {
+            console.error('Error processing image generation webhook:', error);
+          }),
+        );
+        return new Response(
+          JSON.stringify({
+            status: 'accepted',
+            message: 'Webhook received and image generation will be processed asynchronously',
+          }),
+          {
+            status: 202, // Using 202 Accepted to indicate async processing
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
       case '/api/dispatch':
         if (request.method !== 'POST') {
           return new Response('Method not allowed', { status: 405 });
@@ -1459,8 +1473,6 @@ export default {
           return new Response('Unauthorized', { status: 401 });
         }
         const payload = (await request.json()) as NotionWebhookPayload;
-
-        // Extract relevant headers and process-all flag
         const relevantHeaders = {
           'x-notion-signature': notionSignature,
         };
@@ -1477,8 +1489,6 @@ export default {
             console.error('Error processing Notion webhook:', error);
           }),
         );
-
-        // Immediately return response
         return new Response(
           JSON.stringify({
             status: 'accepted',
