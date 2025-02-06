@@ -32,7 +32,7 @@ interface Env {
   IMAGE_GENERATION_SECRET: string;
   IMAGE_GENERATION_BASE_PROMPT: string;
   BlogAssets: KVNamespace;
-  BLOG_TAGS: KVNamespace;
+  BlogOthers: KVNamespace;
   PORTFOLIO_BUCKET: R2Bucket;
   ANTHROPIC_API_KEY: string;
   NOTION_TOKEN: string;
@@ -1158,7 +1158,7 @@ const fetchAndStoreNotionTags = async (env: Env) => {
     const tags = tagsProperty.multi_select.options;
 
     // Store tags in KV
-    await env.BLOG_TAGS.put('tags', JSON.stringify(tags), {
+    await env.BlogOthers.put('tags', JSON.stringify(tags), {
       // Cache for 1 hour
       expirationTtl: 3600
     });
@@ -1268,7 +1268,7 @@ const updateAllPageCoversAndIcons = async (env: Env): Promise<void> => {
       }
     }
 
-    console.log('Successfully processed all pages');
+    console.log('successfully updated all page icons and over images');
   } catch (error) {
     console.error('Error updating pages:', error);
     throw error;
@@ -1394,10 +1394,109 @@ const handleLinkUpdates = async (request: Request, env: Env): Promise<Response> 
   }
 };
 
+const fetchAndStoreCurrentSlugs = async (env: Env) => {
+  const notion = new Client({
+    auth: env.NOTION_TOKEN,
+    notionVersion: '2022-06-28',
+    fetch: (input, init) => fetch(input, init),
+  });
+
+  try {
+    const response = await notion.databases.query({ 
+      database_id: env.NOTION_DATABASE_ID,
+      page_size: 100
+    });
+
+    const slugs = response.results
+      .map(page => page.properties['Slug frontmatter']?.formula?.string)
+      .filter((slug): slug is string => !!slug);
+
+    await env.BlogOthers.put('slugs', JSON.stringify(slugs), {
+      expirationTtl: 3600
+    });
+
+    return slugs;
+  } catch (error) {
+    console.error('Error fetching slugs:', error);
+    throw error;
+  }
+};
+
+const findClosestSlug = (requestedSlug: string, currentSlugs: string[]): string | null => {
+  const requestedKeywords = extractKeywords(requestedSlug);
+  let bestMatch = {
+    slug: '',
+    score: 0,
+    matchedKeywords: 0
+  };
+
+  for (const slug of currentSlugs) {
+    const slugKeywords = extractKeywords(slug);
+    const matchCount = countMatchedKeywords(requestedKeywords, slugKeywords);
+    const score = matchCount / Math.max(requestedKeywords.length, slugKeywords.length);
+
+    if (score > bestMatch.score) {
+      bestMatch = {
+        slug,
+        score,
+        matchedKeywords: matchCount
+      };
+    }
+  }
+
+  return bestMatch.score >= 0.5 ? bestMatch.slug : null;
+};
+
+const extractKeywords = (slug: string): string[] => {
+  return slug
+    .split(/[-_\s]+/)
+    .filter(word => {
+      const isCommonWord = ['the', 'in', 'at', 'on', 'for', 'to', 'of', 'and', 'or', 'what', 'was', 'like'].includes(word);
+      const isShortNumber = !isNaN(Number(word)) && word.length < 4;
+      return !isCommonWord && !isShortNumber && word.length >= 3;
+    });
+};
+
+const countMatchedKeywords = (keywords1: string[], keywords2: string[]): number => {
+  let matches = 0;
+  
+  for (const word1 of keywords1) {
+    for (const word2 of keywords2) {
+      if (word1 === word2 || 
+          (word1.length > 4 && word2.includes(word1)) || 
+          (word2.length > 4 && word1.includes(word2))) {
+        matches++;
+        break;
+      }
+    }
+  }
+
+  return matches;
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const s3Client = createS3Client(env);
+
+    if (!url.pathname.startsWith('/assets/') && 
+      !url.pathname.startsWith('/api/') && 
+      !url.pathname.startsWith('/webhooks/')) {
+    
+    const slug = url.pathname.replace(/^\/blog\/|^\/post\/|^\//, '');
+    
+    if (slug) {
+      const slugsJson = await env.BlogOthers.get('slugs');
+      const currentSlugs: string[] = slugsJson ? JSON.parse(slugsJson) : [];
+      
+      if (!currentSlugs.includes(slug)) {
+        const redirectSlug = findClosestSlug(slug, currentSlugs);
+        if (redirectSlug) {
+          return Response.redirect(`${url.origin}/${redirectSlug}`, 301);
+        }
+      }
+    }
+  }
 
     if (url.pathname.startsWith('/assets/')) {
       return handleAssets(request, env, s3Client);
@@ -1421,7 +1520,7 @@ export default {
     }
 
     if (url.pathname.startsWith('/tags')) {
-      const tagsJson: string | null = await env.BLOG_TAGS.get('tags');
+      const tagsJson: string | null = await env.BlogOthers.get('tags');
       const tags: NotionTag[] = tagsJson ? JSON.parse(tagsJson) : [];
       const tag = url.pathname.split("/")[2]
       const tagExists = tags.some(t => t.name.toLowerCase() === tag.toLowerCase())
@@ -1555,8 +1654,9 @@ export default {
       case "0 */1 * * *":
         await fetchAndStoreNotionTags(env);
         break;
-      case "*/10 * * * *":
+      case "*/3 * * * *":
         await updateAllPageCoversAndIcons(env);
+        await fetchAndStoreCurrentSlugs(env)
         break;
     }
     console.log("cron processed");
