@@ -594,7 +594,7 @@ function formatDate(dateString: string): string {
 }
 
 function formatDateForFolder(dateString: string): string {
-  return new Date(dateString).toISOString().split('T')[0];
+  return new Date(dateString).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
 type NotionClient = InstanceType<typeof Client>;
