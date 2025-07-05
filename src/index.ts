@@ -652,11 +652,7 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       : '';
 
   // Get dates
-  const pubDate =
-    page.properties.Date?.type === 'date' && page.properties.Date.date?.start
-      ? formatDate(page.properties.Date.date.start)
-      : formatDate(page.created_time);
-
+  const pubDate = formatDate(page.created_time);
   const updatedDate = formatDate(page.last_edited_time);
 
   // Get tags
@@ -666,10 +662,7 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       : [];
 
   // Get folder date
-  const folderDate =
-    page.properties.Date?.type === 'date' && page.properties.Date.date?.start
-      ? formatDateForFolder(page.properties.Date.date.start)
-      : formatDateForFolder(page.created_time);
+  const folderDate = formatDateForFolder(page.created_time);
 
   // Process images in the markdown blocks
   for (let i = 0; i < mdblocks.length; i++) {
