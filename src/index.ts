@@ -584,7 +584,13 @@ function formatDate(dateString: string): string {
   const month = date.toLocaleString('default', { month: 'short', timeZone: 'UTC' });
   const day = date.getUTCDate().toString().padStart(2, '0');
   const year = date.getUTCFullYear();
-  return `${month} ${day} ${year}`;
+  const time = date.toLocaleString('default', { 
+    hour: 'numeric', 
+    minute: '2-digit', 
+    hour12: true, 
+    timeZone: 'UTC' 
+  });
+  return `${month} ${day} ${year} ${time}`;
 }
 
 function formatDateForFolder(dateString: string): string {
