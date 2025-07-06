@@ -649,7 +649,14 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       : '';
 
   // Get dates
-  const pubDate = formatDate(page.created_time);
+  const originallyPublishedDate = page.properties['Originally published on']?.type === 'date' && page.properties['Originally published on'].date?.start
+    ? page.properties['Originally published on'].date.start
+    : null;
+  
+  const pubDate = originallyPublishedDate
+    ? formatDate(originallyPublishedDate + 'T00:00:00.000Z')
+    : formatDate(page.created_time);
+  
   const updatedDate = formatDate(page.last_edited_time);
 
   // Get tags
@@ -659,7 +666,9 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       : [];
 
   // Get folder date
-  const folderDate = formatDateForFolder(page.created_time);
+  const folderDate = originallyPublishedDate
+    ? formatDateForFolder(originallyPublishedDate + 'T00:00:00.000Z')
+    : formatDateForFolder(page.created_time);
 
   // Process images in the markdown blocks
   for (let i = 0; i < mdblocks.length; i++) {
