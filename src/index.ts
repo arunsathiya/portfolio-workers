@@ -281,35 +281,32 @@ const handleImageGeneration = async (request: Request, env: Env) => {
   }
 
   try {
-    // Fetch latest data from Notion
-    const notionResponse = await fetch(
-      'https://api.notion.com/v1/databases/8d627174-9239-4deb-ab4b-ea9262e3c066/query',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.NOTION_TOKEN}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ page_size: 100 }),
-      },
-    );
+    // Parse the webhook payload to get page ID
+    const payload = (await request.json()) as NotionWebhookPayload;
+    const pageId = payload.data.id;
+    const databaseId = payload.data.parent.database_id;
 
-    if (!notionResponse.ok) {
-      throw new Error(`Notion API error: ${notionResponse.statusText}`);
+    // Validate that the request is from the correct database
+    if (databaseId !== env.NOTION_DATABASE_ID) {
+      return new Response('Invalid database ID', { status: 400 });
     }
 
-    const notionData: NotionResponse = (await notionResponse.json()) as NotionResponse;
-    const latestPage = notionData.results.sort((a, b) =>
-      b.last_edited_time.localeCompare(a.last_edited_time),
-    )[0];
+    // Fetch the specific page data from Notion
+    const notion = new Client({
+      auth: env.NOTION_TOKEN,
+      notionVersion: '2022-06-28',
+      fetch: (input, init) => fetch(input, init),
+    });
+
+    const pageResponse = await notion.pages.retrieve({ page_id: pageId });
+    const page = pageResponse as NotionPage;
 
     // Extract date and slug
-    const date = latestPage.properties['Date frontmatter'].formula.string;
-    const slug = latestPage.properties['Slug frontmatter'].formula.string;
+    const date = page.properties['Date frontmatter'].formula.string;
+    const slug = page.properties['Slug frontmatter'].formula.string;
 
     // Extract image generation prompt
-    const imageTitle = latestPage.properties['Generate Image Title'].rich_text[0].plain_text;
+    const imageTitle = page.properties['Generate Image Title'].rich_text[0].plain_text;
 
     // Generate and trigger image creation
     const prompt = await generateImagePrompt(imageTitle, env);
