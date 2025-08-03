@@ -165,7 +165,7 @@ const generateImagePrompt = async (title: string, env: Env) => {
     throw new Error('IMAGE_GENERATION_BASE_PROMPT not found in environment variables');
   }
   const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-  const image_url = 'https://closet.tools/uploads/poshmark-algorithm.png';
+  const image_url = 'https://cdn.arun.blog/image.png';
   const image_media_type = 'image/png';
   const image_array_buffer = await (await fetch(image_url)).arrayBuffer();
   const image_data = Buffer.from(image_array_buffer).toString('base64');
