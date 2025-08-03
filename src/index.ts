@@ -273,23 +273,33 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
 };
 
 const handleImageGeneration = async (request: Request, env: Env) => {
+  console.log('🎨 Image generation request received');
+  
   if (
     !env.IMAGE_GENERATION_SECRET ||
     !(await validateAuthToken(request, env.IMAGE_GENERATION_SECRET))
   ) {
+    console.log('❌ Image generation request unauthorized');
     return new Response('Unauthorized', { status: 401 });
   }
+
+  console.log('✅ Image generation request authenticated');
 
   try {
     // Parse the webhook payload to get page ID
     const payload = (await request.json()) as NotionWebhookPayload;
     const pageId = payload.data.id;
     const databaseId = payload.data.parent.database_id;
+    
+    console.log('📝 Parsed payload:', { pageId, databaseId });
 
     // Validate that the request is from the correct database
     if (databaseId !== env.NOTION_DATABASE_ID) {
+      console.log('❌ Invalid database ID:', { received: databaseId, expected: env.NOTION_DATABASE_ID });
       return new Response('Invalid database ID', { status: 400 });
     }
+
+    console.log('✅ Database ID validated');
 
     // Fetch the specific page data from Notion
     const notion = new Client({
@@ -298,6 +308,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
       fetch: (input, init) => fetch(input, init),
     });
 
+    console.log('🔍 Fetching page data from Notion...');
     const pageResponse = await notion.pages.retrieve({ page_id: pageId });
     const page = pageResponse as NotionPage;
 
@@ -308,16 +319,33 @@ const handleImageGeneration = async (request: Request, env: Env) => {
     // Extract image generation prompt
     const imageTitle = page.properties['Generate Image Title'].rich_text[0].plain_text;
 
+    console.log('📊 Extracted page data:', { date, slug, imageTitle });
+
     // Generate and trigger image creation
+    console.log('🤖 Generating image prompt with Claude...');
     const prompt = await generateImagePrompt(imageTitle, env);
+    console.log('✅ Generated prompt:', prompt);
+
     const replicate = new Replicate({ auth: env.REPLICATE_API_TOKEN });
     const callbackUrl = `https://www.arun.blog/webhooks/replicate?date=${date}&slug=${slug}`;
 
-    await replicate.predictions.create({
+    console.log('🚀 Creating Replicate prediction with:', {
+      model: 'black-forest-labs/flux-schnell',
+      callbackUrl,
+      promptLength: prompt.length
+    });
+
+    const prediction = await replicate.predictions.create({
       model: 'black-forest-labs/flux-schnell',
       input: { prompt, num_outputs: 4, aspect_ratio: '16:9' },
       webhook: callbackUrl,
       webhook_events_filter: ['completed'],
+    });
+
+    console.log('✅ Replicate prediction created successfully:', {
+      id: prediction.id,
+      status: prediction.status,
+      created_at: prediction.created_at
     });
 
     return new Response(
@@ -325,6 +353,7 @@ const handleImageGeneration = async (request: Request, env: Env) => {
         imageTitle,
         date,
         slug,
+        predictionId: prediction.id,
         status: 'Image generation requested',
       }),
       {
@@ -333,8 +362,23 @@ const handleImageGeneration = async (request: Request, env: Env) => {
       },
     );
   } catch (error) {
+    console.error('💥 Error in handleImageGeneration:', error);
+    
     if (isReplicateApiError(error)) {
       const status = error.response.status;
+      console.error('🔴 Replicate API error:', {
+        status,
+        statusText: error.response.statusText,
+        url: error.request.url
+      });
+      
+      try {
+        const responseText = await error.response.text();
+        console.error('🔴 Replicate API error response:', responseText);
+      } catch (e) {
+        console.error('🔴 Could not read Replicate error response body');
+      }
+      
       switch (status) {
         case 402:
           return new Response('Monthly spend limit reached.', { status: 402 });
@@ -344,13 +388,17 @@ const handleImageGeneration = async (request: Request, env: Env) => {
           return new Response('API error occurred', { status: status });
       }
     }
-    console.error('Unexpected error:', error);
+    console.error('🔴 Unexpected error in image generation:', error);
     return new Response('An unexpected error occurred', { status: 500 });
   }
 };
 
 const handleReplicateWebhook = async (request: Request, env: Env) => {
+  console.log('🪝 Replicate webhook received');
+  
   const rawBody = await request.text();
+  console.log('📨 Webhook payload size:', rawBody.length);
+  
   const valid = await validateWebhook(
     new Request(request.url, {
       method: request.method,
@@ -359,27 +407,65 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
     }),
     env.REPLICATE_WEBHOOK_SIGNING_KEY,
   );
+  
   if (!valid) {
+    console.log('❌ Invalid webhook signature');
     return new Response('Invalid webhook signature', { status: 401 });
   }
+  
+  console.log('✅ Webhook signature validated');
+  
   const url = new URL(request.url);
   const date = url.searchParams.get('date');
   const slug = url.searchParams.get('slug');
+  
+  console.log('🔍 URL parameters:', { date, slug });
+  
   if (!date || !slug) {
+    console.log('❌ Missing date or slug parameters');
     return new Response('Missing blog post date or slug', { status: 400 });
   }
-  const payload: ReplicatePrediction = JSON.parse(rawBody);
-  if (!Array.isArray(payload.output)) {
-    return new Response('Invalid output format', { status: 400 });
+  
+  try {
+    const payload: ReplicatePrediction = JSON.parse(rawBody);
+    
+    console.log('📊 Replicate prediction status:', {
+      id: payload.id,
+      status: payload.status,
+      completed_at: payload.completed_at,
+      hasOutput: !!payload.output,
+      outputType: Array.isArray(payload.output) ? 'array' : typeof payload.output
+    });
+    
+    if (payload.error) {
+      console.log('❌ Replicate prediction error:', payload.error);
+    }
+    
+    if (!Array.isArray(payload.output)) {
+      console.log('❌ Invalid output format - not an array:', payload.output);
+      return new Response('Invalid output format', { status: 400 });
+    }
+    
+    console.log('📸 Processing', payload.output.length, 'generated images');
+    
+    const uploadPromises = payload.output.map(async (output, index) => {
+      console.log(`⬇️ Downloading image ${index + 1}:`, output);
+      const imageBody = await fetch(output).then((r) => r.arrayBuffer());
+      const fileExtension = output.split('.').pop() || 'webp';
+      const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
+      
+      console.log(`⬆️ Uploading to R2:`, fileName);
+      return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
+    });
+    
+    await Promise.all(uploadPromises);
+    console.log('✅ All images uploaded successfully');
+    
+    return new Response('OK', { status: 200 });
+  } catch (error) {
+    console.error('💥 Error processing Replicate webhook:', error);
+    return new Response('Error processing webhook', { status: 500 });
   }
-  const uploadPromises = payload.output.map(async (output, index) => {
-    const imageBody = await fetch(output).then((r) => r.arrayBuffer());
-    const fileExtension = output.split('.').pop() || 'webp';
-    const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
-    return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
-  });
-  await Promise.all(uploadPromises);
-  return new Response('OK', { status: 200 });
 };
 
 interface R2EventMessage {
