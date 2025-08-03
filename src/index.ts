@@ -294,7 +294,10 @@ const handleImageGeneration = async (request: Request, env: Env) => {
     console.log('📝 Parsed payload:', { pageId, databaseId });
 
     // Validate that the request is from the correct database
-    if (databaseId !== env.NOTION_DATABASE_ID) {
+    const normalizedDatabaseId = databaseId.replace(/[-\s]/g, '');
+    const normalizedTargetId = env.NOTION_DATABASE_ID.replace(/[-\s]/g, '');
+    
+    if (normalizedDatabaseId !== normalizedTargetId) {
       console.log('❌ Invalid database ID:', { received: databaseId, expected: env.NOTION_DATABASE_ID });
       return new Response('Invalid database ID', { status: 400 });
     }
