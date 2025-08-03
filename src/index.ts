@@ -968,7 +968,10 @@ const processNotionWebhook = async (
   const pageId = payload.data.id;
   const databaseId = payload.data.parent.database_id;
 
-  if (databaseId !== env.NOTION_DATABASE_ID) {
+  const normalizedDatabaseId = databaseId.replace(/[-\s]/g, '');
+  const normalizedTargetId = env.NOTION_DATABASE_ID.replace(/[-\s]/g, '');
+  
+  if (normalizedDatabaseId !== normalizedTargetId) {
     console.log('Ignoring webhook - not from target database');
     return;
   }
