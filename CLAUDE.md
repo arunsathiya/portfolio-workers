@@ -38,6 +38,8 @@ git push
 
 ## Cloudflare Workers Deployment
 
+No build step required - Wrangler handles TypeScript bundling automatically.
+
 ### Development
 ```bash
 bun run dev
