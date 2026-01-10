@@ -12,7 +12,7 @@
     "lint": "biome lint ."
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.3.11",
     "@cloudflare/vitest-pool-workers": "^0.5.18",
     "@cloudflare/workers-types": "^4.20250109.0",
     "@vitest/runner": "^2.1.8",
@@ -22,7 +22,7 @@
     "wrangler": "^4.23.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.29.0",
+    "@anthropic-ai/sdk": "^0.71.2",
     "@aws-sdk/client-s3": "^3.670.0",
     "@aws-sdk/s3-request-presigner": "^3.670.0",
     "@notionhq/client": "^2.2.15",

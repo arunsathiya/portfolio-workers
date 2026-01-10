@@ -118,11 +118,13 @@ queue = "notion-updates"
 queue = "cover-image-update"
 max_batch_size = 10
 max_batch_timeout = 30
+dead_letter_queue = "failed-jobs"
 
 [[queues.consumers]]
 queue = "notion-updates"
 max_batch_size = 10
 max_batch_timeout = 30
+dead_letter_queue = "failed-jobs"
 
 [[queues.producers]]
 binding = "IMAGE_UPLOAD_QUEUE"
@@ -132,6 +134,7 @@ queue = "image-upload-queue"
 queue = "image-upload-queue"
 max_batch_size = 10
 max_batch_timeout = 30
+dead_letter_queue = "failed-jobs"
 
 # Bind an R2 Bucket. Use R2 to store arbitrarily large blobs of data, such as files.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#r2-buckets
