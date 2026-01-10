@@ -272,22 +272,8 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
   }
 };
 
-const handleImageGeneration = async (request: Request, env: Env) => {
-  console.log('🎨 Image generation request received');
-  
-  if (
-    !env.IMAGE_GENERATION_SECRET ||
-    !(await validateAuthToken(request, env.IMAGE_GENERATION_SECRET))
-  ) {
-    console.log('❌ Image generation request unauthorized');
-    return new Response('Unauthorized', { status: 401 });
-  }
-
-  console.log('✅ Image generation request authenticated');
-
+const handleImageGeneration = async (payload: NotionWebhookPayload, env: Env) => {
   try {
-    // Parse the webhook payload to get page ID
-    const payload = (await request.json()) as NotionWebhookPayload;
     const pageId = payload.data.id;
     const databaseId = payload.data.parent.database_id;
     
@@ -1678,12 +1664,23 @@ export default {
     }
 
     switch (url.pathname) {
-      case '/api/generate-image':
+      case '/api/generate-image': {
         if (request.method !== 'POST') {
           return new Response('Method not allowed', { status: 405 });
         }
+        console.log('🎨 Image generation request received');
+        if (
+          !env.IMAGE_GENERATION_SECRET ||
+          !(await validateAuthToken(request, env.IMAGE_GENERATION_SECRET))
+        ) {
+          console.log('❌ Image generation request unauthorized');
+          return new Response('Unauthorized', { status: 401 });
+        }
+        console.log('✅ Image generation request authenticated');
+        // Parse body BEFORE returning response (request stream closes after response)
+        const imagePayload = (await request.json()) as NotionWebhookPayload;
         ctx.waitUntil(
-          handleImageGeneration(request, env).catch((error) => {
+          handleImageGeneration(imagePayload, env).catch((error) => {
             console.error('Error processing image generation webhook:', error);
           }),
         );
@@ -1697,6 +1694,7 @@ export default {
             headers: { 'Content-Type': 'application/json' },
           },
         );
+      }
       case '/api/dispatch':
         if (request.method !== 'POST') {
           return new Response('Method not allowed', { status: 405 });

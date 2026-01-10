@@ -9,6 +9,8 @@
 
 ## Git Workflow
 
+**Always commit and push after making code changes.** Do not leave changes uncommitted.
+
 ### Commits
 Use conventional commit format with the `--prompt` flag:
 
