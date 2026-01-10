@@ -173,4 +173,4 @@ dist
 .DS_Store
 
 # Local notes
-IMPROVEMENTS.md
+*.local.md
