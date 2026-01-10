@@ -124,6 +124,27 @@ const createS3Client = (env: Env) =>
     },
   });
 
+// CORS headers for API responses
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+// Helper to create JSON response with CORS
+const jsonResponse = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+  });
+
+// Normalize UUID to canonical format (8-4-4-4-12 with hyphens)
+const normalizeUUID = (id: string): string | null => {
+  const hex = id.replace(/[-\s]/g, '').toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hex)) return null;
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
 const handleAssets = async (request: Request, env: Env, s3Client: S3Client) => {
   const url = new URL(request.url);
   const key = url.pathname.slice(1);
@@ -250,24 +271,15 @@ const handleGitHubDispatch = async (request: Request, env: Env) => {
       throw new Error(`GitHub API error: ${githubResponse.statusText}`);
     }
 
-    return new Response(
-      JSON.stringify({
-        commit_message,
-        status: 'GitHub repository dispatch triggered',
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
+    return jsonResponse({
+      commit_message,
+      status: 'GitHub repository dispatch triggered',
+    });
   } catch (error) {
     console.error('Error:', error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error occurred' }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      },
+    return jsonResponse(
+      { error: error instanceof Error ? error.message : 'Unknown error occurred' },
+      500,
     );
   }
 };
@@ -276,15 +288,22 @@ const handleImageGeneration = async (payload: NotionWebhookPayload, env: Env) =>
   try {
     const pageId = payload.data.id;
     const databaseId = payload.data.parent.database_id;
-    
+
     console.log('📝 Parsed payload:', { pageId, databaseId });
 
     // Validate that the request is from the correct database
-    const normalizedDatabaseId = databaseId.replace(/[-\s]/g, '');
-    const normalizedTargetId = env.NOTION_DATABASE_ID.replace(/[-\s]/g, '');
-    
-    if (normalizedDatabaseId !== normalizedTargetId) {
-      console.log('❌ Invalid database ID:', { received: databaseId, expected: env.NOTION_DATABASE_ID });
+    const normalizedDatabaseId = normalizeUUID(databaseId);
+    const normalizedTargetId = normalizeUUID(env.NOTION_DATABASE_ID);
+
+    if (
+      !normalizedDatabaseId ||
+      !normalizedTargetId ||
+      normalizedDatabaseId !== normalizedTargetId
+    ) {
+      console.log('❌ Invalid database ID:', {
+        received: databaseId,
+        expected: env.NOTION_DATABASE_ID,
+      });
       return new Response('Invalid database ID', { status: 400 });
     }
 
@@ -321,7 +340,7 @@ const handleImageGeneration = async (payload: NotionWebhookPayload, env: Env) =>
     console.log('🚀 Creating Replicate prediction with:', {
       model: 'black-forest-labs/flux-schnell',
       callbackUrl,
-      promptLength: prompt.length
+      promptLength: prompt.length,
     });
 
     const prediction = await replicate.predictions.create({
@@ -334,40 +353,34 @@ const handleImageGeneration = async (payload: NotionWebhookPayload, env: Env) =>
     console.log('✅ Replicate prediction created successfully:', {
       id: prediction.id,
       status: prediction.status,
-      created_at: prediction.created_at
+      created_at: prediction.created_at,
     });
 
-    return new Response(
-      JSON.stringify({
-        imageTitle,
-        date,
-        slug,
-        predictionId: prediction.id,
-        status: 'Image generation requested',
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
+    return jsonResponse({
+      imageTitle,
+      date,
+      slug,
+      predictionId: prediction.id,
+      status: 'Image generation requested',
+    });
   } catch (error) {
     console.error('💥 Error in handleImageGeneration:', error);
-    
+
     if (isReplicateApiError(error)) {
       const status = error.response.status;
       console.error('🔴 Replicate API error:', {
         status,
         statusText: error.response.statusText,
-        url: error.request.url
+        url: error.request.url,
       });
-      
+
       try {
         const responseText = await error.response.text();
         console.error('🔴 Replicate API error response:', responseText);
       } catch (e) {
         console.error('🔴 Could not read Replicate error response body');
       }
-      
+
       switch (status) {
         case 402:
           return new Response('Monthly spend limit reached.', { status: 402 });
@@ -384,10 +397,10 @@ const handleImageGeneration = async (payload: NotionWebhookPayload, env: Env) =>
 
 const handleReplicateWebhook = async (request: Request, env: Env) => {
   console.log('🪝 Replicate webhook received');
-  
+
   const rawBody = await request.text();
   console.log('📨 Webhook payload size:', rawBody.length);
-  
+
   const valid = await validateWebhook(
     new Request(request.url, {
       method: request.method,
@@ -396,60 +409,77 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
     }),
     env.REPLICATE_WEBHOOK_SIGNING_KEY,
   );
-  
+
   if (!valid) {
     console.log('❌ Invalid webhook signature');
     return new Response('Invalid webhook signature', { status: 401 });
   }
-  
+
   console.log('✅ Webhook signature validated');
-  
+
   const url = new URL(request.url);
   const date = url.searchParams.get('date');
   const slug = url.searchParams.get('slug');
-  
+
   console.log('🔍 URL parameters:', { date, slug });
-  
+
   if (!date || !slug) {
     console.log('❌ Missing date or slug parameters');
     return new Response('Missing blog post date or slug', { status: 400 });
   }
-  
+
   try {
     const payload: ReplicatePrediction = JSON.parse(rawBody);
-    
+
     console.log('📊 Replicate prediction status:', {
       id: payload.id,
       status: payload.status,
       completed_at: payload.completed_at,
       hasOutput: !!payload.output,
-      outputType: Array.isArray(payload.output) ? 'array' : typeof payload.output
+      outputType: Array.isArray(payload.output) ? 'array' : typeof payload.output,
     });
-    
+
     if (payload.error) {
       console.log('❌ Replicate prediction error:', payload.error);
     }
-    
+
     if (!Array.isArray(payload.output)) {
       console.log('❌ Invalid output format - not an array:', payload.output);
       return new Response('Invalid output format', { status: 400 });
     }
-    
+
     console.log('📸 Processing', payload.output.length, 'generated images');
-    
-    const uploadPromises = payload.output.map(async (output, index) => {
-      console.log(`⬇️ Downloading image ${index + 1}:`, output);
-      const imageBody = await fetch(output).then((r) => r.arrayBuffer());
-      const fileExtension = output.split('.').pop() || 'webp';
-      const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
-      
-      console.log(`⬆️ Uploading to R2:`, fileName);
-      return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
-    });
-    
-    await Promise.all(uploadPromises);
-    console.log('✅ All images uploaded successfully');
-    
+
+    const uploadResults = await Promise.allSettled(
+      payload.output.map(async (output, index) => {
+        console.log(`⬇️ Downloading image ${index + 1}:`, output);
+        const response = await fetch(output);
+        if (!response.ok) {
+          throw new Error(
+            `Failed to download image ${index + 1}: ${response.status} ${response.statusText}`,
+          );
+        }
+        const imageBody = await response.arrayBuffer();
+        const fileExtension = output.split('.').pop() || 'webp';
+        const fileName = `sandbox/${date}-${slug}/${payload.id}_${index}.${fileExtension}`;
+
+        console.log(`⬆️ Uploading to R2:`, fileName);
+        return env.PORTFOLIO_BUCKET.put(fileName, imageBody);
+      }),
+    );
+
+    const failures = uploadResults.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    if (failures.length > 0) {
+      console.error(
+        '❌ Some images failed to upload:',
+        failures.map((f) => f.reason),
+      );
+    }
+    const successes = uploadResults.filter((r) => r.status === 'fulfilled').length;
+    console.log(`✅ ${successes}/${uploadResults.length} images uploaded successfully`);
+
     return new Response('OK', { status: 200 });
   } catch (error) {
     console.error('💥 Error processing Replicate webhook:', error);
@@ -656,11 +686,11 @@ function formatDate(dateString: string): string {
   const month = date.toLocaleString('default', { month: 'short', timeZone: 'UTC' });
   const day = date.getUTCDate().toString().padStart(2, '0');
   const year = date.getUTCFullYear();
-  const time = date.toLocaleString('default', { 
-    hour: 'numeric', 
-    minute: '2-digit', 
-    hour12: true, 
-    timeZone: 'UTC' 
+  const time = date.toLocaleString('default', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'UTC',
   });
   return `${month} ${day} ${year} ${time}`;
 }
@@ -724,14 +754,16 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
       : '';
 
   // Get dates
-  const originallyPublishedDate = page.properties['Originally published on']?.type === 'date' && page.properties['Originally published on'].date?.start
-    ? page.properties['Originally published on'].date.start
-    : null;
-  
+  const originallyPublishedDate =
+    page.properties['Originally published on']?.type === 'date' &&
+    page.properties['Originally published on'].date?.start
+      ? page.properties['Originally published on'].date.start
+      : null;
+
   const pubDate = originallyPublishedDate
     ? formatDate(originallyPublishedDate + 'T00:00:00.000Z')
     : formatDate(page.created_time);
-  
+
   const updatedDate = formatDate(page.last_edited_time);
 
   // Get tags
@@ -1043,10 +1075,10 @@ const processNotionWebhook = async (
   const pageId = payload.data.id;
   const databaseId = payload.data.parent.database_id;
 
-  const normalizedDatabaseId = databaseId.replace(/[-\s]/g, '');
-  const normalizedTargetId = env.NOTION_DATABASE_ID.replace(/[-\s]/g, '');
-  
-  if (normalizedDatabaseId !== normalizedTargetId) {
+  const normalizedDatabaseId = normalizeUUID(databaseId);
+  const normalizedTargetId = normalizeUUID(env.NOTION_DATABASE_ID);
+
+  if (!normalizedDatabaseId || !normalizedTargetId || normalizedDatabaseId !== normalizedTargetId) {
     console.log('Ignoring webhook - not from target database');
     return;
   }
@@ -1224,14 +1256,14 @@ const fetchAndStoreNotionTags = async (env: Env) => {
 
   try {
     // Fetch database metadata which includes tag options
-    const response = await notion.databases.retrieve({ 
-      database_id: env.NOTION_DATABASE_ID 
+    const response = await notion.databases.retrieve({
+      database_id: env.NOTION_DATABASE_ID,
     });
 
     // Extract tags from the multi-select property
     const tagsProperty = Object.values(response.properties).find(
-      prop => prop.type === 'multi_select'
-    ) as { type: 'multi_select', multi_select: { options: NotionTag[] } };
+      (prop) => prop.type === 'multi_select',
+    ) as { type: 'multi_select'; multi_select: { options: NotionTag[] } };
 
     if (!tagsProperty || !tagsProperty.multi_select?.options) {
       console.error('No multi-select tags property found in database');
@@ -1243,12 +1275,11 @@ const fetchAndStoreNotionTags = async (env: Env) => {
     // Store tags in KV
     await env.BlogOthers.put('tags', JSON.stringify(tags), {
       // Cache for 1 hour
-      expirationTtl: 3600
+      expirationTtl: 3600,
     });
 
     console.log(`Successfully stored ${tags.length} tags in KV`);
     return tags;
-
   } catch (error) {
     console.error('Error fetching or storing Notion tags:', error);
     throw error;
@@ -1313,17 +1344,17 @@ const updateAllPageCoversAndIcons = async (env: Env): Promise<void> => {
             // Retrieve current page
             const currentPage = await notion.pages.retrieve({ page_id: page.id });
             if (!isFullPage(currentPage)) {
-              console.log(`Skipping page ${page.id} - not a full page object`)
-              return
+              console.log(`Skipping page ${page.id} - not a full page object`);
+              return;
             }
 
             const updates: any = {};
-            
+
             // Only update if missing cover or icon
             if (!currentPage.cover) {
               updates.cover = getRandomCover();
             }
-            
+
             if (!currentPage.icon) {
               updates.icon = {
                 type: 'emoji',
@@ -1342,12 +1373,12 @@ const updateAllPageCoversAndIcons = async (env: Env): Promise<void> => {
           } catch (error) {
             console.error(`Failed to update page ${page.id}:`, error);
           }
-        })
+        }),
       );
 
       // Add a small delay between batches
       if (i + BATCH_SIZE < pages.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
@@ -1367,11 +1398,12 @@ const updatePageLinks = async (pageId: string, notion: Client): Promise<void> =>
     if (isParagraphBlock(block)) {
       let isBlockModified = false;
       const updatedRichText = block.paragraph.rich_text.map((textBlock) => {
-        if (isTextRichTextItem(textBlock) && (
-          textBlock.text.link?.url.includes('arun.blog/blog/') ||
-          textBlock.text.link?.url.includes('arun.blog/post/') ||
-          textBlock.text.link?.url.includes('arun.blog/tag/')
-        )) {
+        if (
+          isTextRichTextItem(textBlock) &&
+          (textBlock.text.link?.url.includes('arun.blog/blog/') ||
+            textBlock.text.link?.url.includes('arun.blog/post/') ||
+            textBlock.text.link?.url.includes('arun.blog/tag/'))
+        ) {
           isBlockModified = true;
           return {
             type: 'text',
@@ -1447,33 +1479,29 @@ const handleLinkUpdates = async (request: Request, env: Env): Promise<Response> 
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             results.errors.push(`Error processing page ${page.id}: ${errorMessage}`);
           }
-        })
+        }),
       );
 
       // Add a small delay between batches to respect rate limits
       if (i + BATCH_SIZE < pages.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       status: 'success',
       message: `Processed ${results.processed} pages`,
       errors: results.errors.length > 0 ? results.errors : undefined,
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
     });
-
   } catch (error) {
     console.error('Error processing link updates:', error);
-    return new Response(JSON.stringify({
-      status: 'error',
-      message: error instanceof Error ? error.message : 'An unexpected error occurred',
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonResponse(
+      {
+        status: 'error',
+        message: error instanceof Error ? error.message : 'An unexpected error occurred',
+      },
+      500,
+    );
   }
 };
 
@@ -1485,17 +1513,17 @@ const fetchAndStoreCurrentSlugs = async (env: Env) => {
   });
 
   try {
-    const response = await notion.databases.query({ 
+    const response = await notion.databases.query({
       database_id: env.NOTION_DATABASE_ID,
-      page_size: 100
+      page_size: 100,
     });
 
     const slugs = response.results
-      .map(page => page.properties['Slug frontmatter']?.formula?.string)
+      .map((page) => page.properties['Slug frontmatter']?.formula?.string)
       .filter((slug): slug is string => !!slug);
 
     await env.BlogOthers.put('slugs', JSON.stringify(slugs), {
-      expirationTtl: 3600
+      expirationTtl: 3600,
     });
 
     return slugs;
@@ -1510,18 +1538,18 @@ const findClosestSlug = (requestedSlug: string, currentSlugs: string[]): string 
   let bestMatch = {
     slug: '',
     score: 0,
-    matchedKeywords: 0
+    matchedKeywords: 0,
   };
 
   for (const slug of currentSlugs) {
     const slugKeywords = extractKeywords(slug);
     const matchResult = evaluateMatch(requestedKeywords, slugKeywords);
-    
+
     if (matchResult.score > bestMatch.score) {
       bestMatch = {
         slug,
         score: matchResult.score,
-        matchedKeywords: matchResult.matches
+        matchedKeywords: matchResult.matches,
       };
     }
   }
@@ -1565,7 +1593,7 @@ const evaluateMatch = (searchWords: string[], targetWords: string[]) => {
 
   return {
     matches,
-    score: (matches + partialMatches * 0.5) / Math.max(searchWords.length, 2)
+    score: (matches + partialMatches * 0.5) / Math.max(searchWords.length, 2),
   };
 };
 
@@ -1573,32 +1601,45 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   // Simple character-based similarity
   const maxLength = Math.max(str1.length, str2.length);
   let matches = 0;
-  
+
   for (let i = 0; i < Math.min(str1.length, str2.length); i++) {
     if (str1[i] === str2[i]) matches++;
   }
-  
+
   return matches / maxLength;
 };
 
 const extractKeywords = (slug: string): string[] => {
-  return slug
-    .split(/[-_\s]+/)
-    .filter(word => {
-      const isCommonWord = ['the', 'in', 'at', 'on', 'for', 'to', 'of', 'and', 'or', 'what', 'was', 'like'].includes(word);
-      const isShortNumber = !isNaN(Number(word)) && word.length < 4;
-      return !isCommonWord && !isShortNumber && word.length >= 3;
-    });
+  return slug.split(/[-_\s]+/).filter((word) => {
+    const isCommonWord = [
+      'the',
+      'in',
+      'at',
+      'on',
+      'for',
+      'to',
+      'of',
+      'and',
+      'or',
+      'what',
+      'was',
+      'like',
+    ].includes(word);
+    const isShortNumber = !isNaN(Number(word)) && word.length < 4;
+    return !isCommonWord && !isShortNumber && word.length >= 3;
+  });
 };
 
 const countMatchedKeywords = (keywords1: string[], keywords2: string[]): number => {
   let matches = 0;
-  
+
   for (const word1 of keywords1) {
     for (const word2 of keywords2) {
-      if (word1 === word2 || 
-          (word1.length > 4 && word2.includes(word1)) || 
-          (word2.length > 4 && word1.includes(word2))) {
+      if (
+        word1 === word2 ||
+        (word1.length > 4 && word2.includes(word1)) ||
+        (word2.length > 4 && word1.includes(word2))
+      ) {
         matches++;
         break;
       }
@@ -1613,41 +1654,47 @@ export default {
     const url = new URL(request.url);
     const s3Client = createS3Client(env);
 
-    if (!url.pathname.startsWith('/assets/') && 
-      !url.pathname.startsWith('/api/') && 
-      !url.pathname.startsWith('/webhooks/')) {
-    
-    const slug = url.pathname.replace(/^\/blog\/|^\/post\/|^\//, '');
-    
-    if (slug) {
-      const slugsJson = await env.BlogOthers.get('slugs');
-      const currentSlugs: string[] = slugsJson ? JSON.parse(slugsJson) : [];
-      
-      if (!currentSlugs.includes(slug)) {
-        const redirectSlug = findClosestSlug(slug, currentSlugs);
-        if (redirectSlug) {
-          return Response.redirect(`${url.origin}/${redirectSlug}`, 301);
+    // Handle CORS preflight requests
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    if (
+      !url.pathname.startsWith('/assets/') &&
+      !url.pathname.startsWith('/api/') &&
+      !url.pathname.startsWith('/webhooks/')
+    ) {
+      const slug = url.pathname.replace(/^\/blog\/|^\/post\/|^\//, '');
+
+      if (slug) {
+        const slugsJson = await env.BlogOthers.get('slugs');
+        const currentSlugs: string[] = slugsJson ? JSON.parse(slugsJson) : [];
+
+        if (!currentSlugs.includes(slug)) {
+          const redirectSlug = findClosestSlug(slug, currentSlugs);
+          if (redirectSlug) {
+            return Response.redirect(`${url.origin}/${redirectSlug}`, 301);
+          }
         }
       }
     }
-  }
 
     if (url.pathname.startsWith('/assets/')) {
       return handleAssets(request, env, s3Client);
     }
 
-    if (url.pathname === "/api/changes-on-notion") {
-      if (request.method !== "POST") {
-        return new Response(`Method not allowed`, {status: 405})
+    if (url.pathname === '/api/changes-on-notion') {
+      if (request.method !== 'POST') {
+        return new Response(`Method not allowed`, { status: 405 });
       }
-      return handleLinkUpdates(request, env)
+      return handleLinkUpdates(request, env);
     }
 
     if (url.pathname.startsWith('/blog/')) {
       const newPath = url.pathname.replace('/blog/', '/');
       return Response.redirect(url.origin + newPath, 301);
     }
-    
+
     if (url.pathname.startsWith('/post/')) {
       const newPath = url.pathname.replace('/post/', '/');
       return Response.redirect(url.origin + newPath, 301);
@@ -1656,8 +1703,8 @@ export default {
     if (url.pathname.startsWith('/tags')) {
       const tagsJson: string | null = await env.BlogOthers.get('tags');
       const tags: NotionTag[] = tagsJson ? JSON.parse(tagsJson) : [];
-      const tag = url.pathname.split("/")[2]
-      const tagExists = tags.some(t => t.name.toLowerCase() === tag.toLowerCase())
+      const tag = url.pathname.split('/')[2];
+      const tagExists = tags.some((t) => t.name.toLowerCase() === tag.toLowerCase());
       if (!tagExists) {
         return Response.redirect(`${url.origin}/tags`, 301);
       }
@@ -1684,15 +1731,12 @@ export default {
             console.error('Error processing image generation webhook:', error);
           }),
         );
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             status: 'accepted',
             message: 'Webhook received and image generation will be processed asynchronously',
-          }),
-          {
-            status: 202, // Using 202 Accepted to indicate async processing
-            headers: { 'Content-Type': 'application/json' },
           },
+          202,
         );
       }
       case '/api/dispatch':
@@ -1734,15 +1778,12 @@ export default {
             console.error('Error processing Notion webhook:', error);
           }),
         );
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             status: 'accepted',
             message: 'Webhook received and will be processed asynchronously',
-          }),
-          {
-            status: 202, // Using 202 Accepted to indicate async processing
-            headers: { 'Content-Type': 'application/json' },
           },
+          202,
         );
       }
       default:
@@ -1789,6 +1830,19 @@ export default {
             `Failed to process message after ${message.attempts} attempts:`,
             message.body,
           );
+          // Store failed message in KV for later inspection
+          const failedMessageKey = `dead-letter:${Date.now()}`;
+          await env.BlogOthers.put(
+            failedMessageKey,
+            JSON.stringify({
+              timestamp: new Date().toISOString(),
+              attempts: message.attempts,
+              body: message.body,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+            { expirationTtl: 60 * 60 * 24 * 7 }, // Keep for 7 days
+          );
+          console.error(`Dead letter stored: ${failedMessageKey}`);
           message.ack();
         }
       }
@@ -1797,14 +1851,14 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     switch (event.cron) {
-      case "0 */1 * * *":
+      case '0 */1 * * *':
         await fetchAndStoreNotionTags(env);
         break;
-      case "*/3 * * * *":
+      case '*/3 * * * *':
         await updateAllPageCoversAndIcons(env);
-        await fetchAndStoreCurrentSlugs(env)
+        await fetchAndStoreCurrentSlugs(env);
         break;
     }
-    console.log("cron processed");
+    console.log('cron processed');
   },
 } satisfies ExportedHandler<Env>;
