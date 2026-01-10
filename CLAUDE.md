@@ -12,7 +12,7 @@
 **Always commit and push after making code changes.** Do not leave changes uncommitted.
 
 ### Commits
-Use conventional commit format with the `--prompt` flag:
+Use conventional commit format:
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
@@ -22,7 +22,7 @@ git add -A && git commit -m "$(cat <<'EOF'
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
-)" --prompt "<brief description of what was requested>"
+)"
 ```
 
 **Commit types:**
