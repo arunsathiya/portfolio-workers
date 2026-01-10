@@ -170,7 +170,7 @@ const generateImagePrompt = async (title: string, env: Env) => {
   const image_array_buffer = await (await fetch(image_url)).arrayBuffer();
   const image_data = Buffer.from(image_array_buffer).toString('base64');
   const msg = await anthropic.messages.create({
-    model: 'claude-3-5-sonnet-latest',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 1000,
     temperature: 0,
     system:
