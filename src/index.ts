@@ -764,6 +764,19 @@ const escapeYamlString = (str: string) => {
   return str.replace(/'/g, "''");
 };
 
+// Detect which cover image extension exists in the GitHub folder
+const getCoverImageExtension = async (folderPath: string, env: Env): Promise<string> => {
+  const extensions = ['webp', 'jpeg', 'jpg'];
+  for (const ext of extensions) {
+    const imagePath = `${folderPath}/image.${ext}`;
+    if (await fileExistsInRepo(imagePath, env)) {
+      return ext;
+    }
+  }
+  // Default to webp for new pages
+  return 'webp';
+};
+
 const processPage = async (pageId: string, env: Env, s3: S3Client) => {
   const notion = new Client({
     auth: env.NOTION_TOKEN,
@@ -825,6 +838,10 @@ const processPage = async (pageId: string, env: Env, s3: S3Client) => {
     ? formatDateForFolder(originallyPublishedDate + 'T00:00:00.000Z')
     : formatDateForFolder(page.created_time);
 
+  // Detect existing cover image extension
+  const blogFolderPath = `src/content/blog/${folderDate}-${slug}`;
+  const coverImageExt = await getCoverImageExtension(blogFolderPath, env);
+
   // Process images in the markdown blocks
   for (let i = 0; i < mdblocks.length; i++) {
     const block = mdblocks[i];
@@ -867,7 +884,7 @@ description: '${escapeYamlString(description)}'
 pubDate: '${pubDate}'
 updatedDate: '${updatedDate}'
 tags: ${JSON.stringify(tags)}
-coverImage: './image.webp'
+coverImage: './image.${coverImageExt}'
 ---${
     postContainsImages
       ? `
