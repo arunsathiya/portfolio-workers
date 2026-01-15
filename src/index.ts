@@ -338,14 +338,14 @@ const handleImageGeneration = async (payload: NotionWebhookPayload, env: Env) =>
     const callbackUrl = `https://www.arun.blog/webhooks/replicate?date=${date}&slug=${slug}`;
 
     console.log('🚀 Creating Replicate prediction with:', {
-      model: 'black-forest-labs/flux-schnell',
+      model: 'prunaai/p-image',
       callbackUrl,
       promptLength: prompt.length,
     });
 
     const prediction = await replicate.predictions.create({
-      model: 'black-forest-labs/flux-schnell',
-      input: { prompt, num_outputs: 4, aspect_ratio: '16:9' },
+      model: 'prunaai/p-image',
+      input: { prompt },
       webhook: callbackUrl,
       webhook_events_filter: ['completed'],
     });
@@ -443,15 +443,22 @@ const handleReplicateWebhook = async (request: Request, env: Env) => {
       console.log('❌ Replicate prediction error:', payload.error);
     }
 
-    if (!Array.isArray(payload.output)) {
-      console.log('❌ Invalid output format - not an array:', payload.output);
+    // Handle both single URL string and array of URLs
+    const outputs: string[] = Array.isArray(payload.output)
+      ? payload.output
+      : typeof payload.output === 'string'
+        ? [payload.output]
+        : [];
+
+    if (outputs.length === 0) {
+      console.log('❌ Invalid output format:', payload.output);
       return new Response('Invalid output format', { status: 400 });
     }
 
-    console.log('📸 Processing', payload.output.length, 'generated images');
+    console.log('📸 Processing', outputs.length, 'generated images');
 
     const uploadResults = await Promise.allSettled(
-      payload.output.map(async (output, index) => {
+      outputs.map(async (output, index) => {
         console.log(`⬇️ Downloading image ${index + 1}:`, output);
         const response = await fetch(output);
         if (!response.ok) {
