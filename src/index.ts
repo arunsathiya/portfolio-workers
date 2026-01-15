@@ -557,6 +557,36 @@ const getFileContent = async (path: string, env: Env): Promise<string | null> =>
   return result.data.repository.object?.text ?? null;
 };
 
+// Check if a file exists in the repo (works for binary files too)
+const fileExistsInRepo = async (path: string, env: Env): Promise<boolean> => {
+  const query = `
+    query CheckFileExists {
+      repository(owner: "arunsathiya", name: "portfolio") {
+        object(expression: "main:${path}") {
+          oid
+        }
+      }
+    }
+  `;
+
+  const response = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_PAT}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Cloudflare-Worker',
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const result = await response.json();
+  return result.data.repository.object !== null;
+};
+
 interface FileChange {
   path: string;
   content: string | ArrayBuffer;
@@ -1209,8 +1239,8 @@ async function processR2Event(event: R2EventMessage, env: Env) {
     for (const ext of imageExtensions) {
       if (ext !== sourceExtension) {
         const existingPath = `src/content/blog/${dateSlugPart}/image.${ext}`;
-        const existingContent = await getFileContent(existingPath, env);
-        if (existingContent !== null) {
+        const exists = await fileExistsInRepo(existingPath, env);
+        if (exists) {
           deletions.push(existingPath);
           console.log(`Will delete existing image: ${existingPath}`);
         }
