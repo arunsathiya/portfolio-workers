@@ -1247,13 +1247,34 @@ async function processR2Event(event: R2EventMessage, env: Env) {
       }
     }
 
+    // Update the frontmatter coverImage in index.mdx
+    const mdxPath = `src/content/blog/${dateSlugPart}/index.mdx`;
+    const mdxContent = await getFileContent(mdxPath, env);
+    const filesToCommit: FileChange[] = [
+      {
+        path: targetPath,
+        content: arrayBuffer,
+      },
+    ];
+
+    if (mdxContent) {
+      // Replace coverImage with the new extension
+      const updatedMdxContent = mdxContent.replace(
+        /coverImage:\s*['"]\.\/image\.(webp|jpe?g)['"]/,
+        `coverImage: './image.${sourceExtension}'`,
+      );
+
+      if (updatedMdxContent !== mdxContent) {
+        filesToCommit.push({
+          path: mdxPath,
+          content: updatedMdxContent,
+        });
+        console.log(`Will update frontmatter in: ${mdxPath}`);
+      }
+    }
+
     await commitToGitHub(
-      [
-        {
-          path: targetPath,
-          content: arrayBuffer,
-        },
-      ],
+      filesToCommit,
       `chore: update cover image for ${dateSlugPart}`,
       env,
       deletions,
@@ -1264,6 +1285,7 @@ async function processR2Event(event: R2EventMessage, env: Env) {
       gitPath: targetPath,
       size: event.object.size,
       deletedFiles: deletions,
+      updatedFrontmatter: filesToCommit.length > 1,
     });
   }
 }
