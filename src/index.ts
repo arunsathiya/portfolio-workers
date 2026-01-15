@@ -1915,7 +1915,7 @@ export default {
         if (
           isR2Event(payload) &&
           payload.action === 'CopyObject' &&
-          /image\.(webp|jpe?g)$/.test(payload.object.key)
+          /\/image\.(webp|jpe?g)$/.test(payload.object.key)
         ) {
           await processR2Event(payload, env);
           message.ack();
