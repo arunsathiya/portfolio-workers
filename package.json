@@ -28,6 +28,6 @@
     "@notionhq/client": "^2.2.15",
     "notion-to-md": "^3.1.4",
     "path": "^0.12.7",
-    "replicate": "^1.0.1"
+    "replicate": "^1.4.0"
   }
 }
