@@ -562,7 +562,12 @@ interface FileChange {
   content: string | ArrayBuffer;
 }
 
-const commitToGitHub = async (files: FileChange[], message: string, env: Env): Promise<boolean> => {
+const commitToGitHub = async (
+  files: FileChange[],
+  message: string,
+  env: Env,
+  deletions: string[] = [],
+): Promise<boolean> => {
   const contentChecks = await Promise.all(
     files.map(async (file) => {
       const currentContent = await getFileContent(file.path, env);
@@ -582,7 +587,7 @@ const commitToGitHub = async (files: FileChange[], message: string, env: Env): P
     .filter((check) => check.hasChanged)
     .map((check) => check.addition);
 
-  if (additions.length === 0) {
+  if (additions.length === 0 && deletions.length === 0) {
     console.log('No changes detected in any files, skipping commit');
     return false;
   }
@@ -597,6 +602,14 @@ const commitToGitHub = async (files: FileChange[], message: string, env: Env): P
     }
   `;
 
+  const fileChanges: { additions: typeof additions; deletions?: { path: string }[] } = {
+    additions,
+  };
+
+  if (deletions.length > 0) {
+    fileChanges.deletions = deletions.map((path) => ({ path }));
+  }
+
   const variables = {
     input: {
       branch: {
@@ -607,9 +620,7 @@ const commitToGitHub = async (files: FileChange[], message: string, env: Env): P
         headline: message,
         body: 'Commit created by github-actions[bot]\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>',
       },
-      fileChanges: {
-        additions,
-      },
+      fileChanges,
       expectedHeadOid: await getLatestCommitOid(env),
     },
   };
@@ -1186,24 +1197,43 @@ async function processR2Event(event: R2EventMessage, env: Env) {
       throw new Error(`Object not found in R2: ${event.object.key}`);
     }
 
+    // Extract the extension from the source file
+    const sourceExtension = event.object.key.split('.').pop() || 'webp';
     const arrayBuffer = await r2Object.arrayBuffer();
-    const path = `src/content/blog/${dateSlugPart}/image.webp`;
+    const targetPath = `src/content/blog/${dateSlugPart}/image.${sourceExtension}`;
+
+    // Check for existing images with different extensions to delete
+    const imageExtensions = ['webp', 'jpeg', 'jpg'];
+    const deletions: string[] = [];
+
+    for (const ext of imageExtensions) {
+      if (ext !== sourceExtension) {
+        const existingPath = `src/content/blog/${dateSlugPart}/image.${ext}`;
+        const existingContent = await getFileContent(existingPath, env);
+        if (existingContent !== null) {
+          deletions.push(existingPath);
+          console.log(`Will delete existing image: ${existingPath}`);
+        }
+      }
+    }
 
     await commitToGitHub(
       [
         {
-          path,
+          path: targetPath,
           content: arrayBuffer,
         },
       ],
       `chore: update cover image for ${dateSlugPart}`,
       env,
+      deletions,
     );
 
     console.log('Successfully processed image:', {
       r2Path: event.object.key,
-      gitPath: path,
+      gitPath: targetPath,
       size: event.object.size,
+      deletedFiles: deletions,
     });
   }
 }
@@ -1812,11 +1842,11 @@ export default {
           message.ack();
           continue;
         }
-        // Handle R2 events
+        // Handle R2 events for cover images (webp or jpeg)
         if (
           isR2Event(payload) &&
           payload.action === 'CopyObject' &&
-          payload.object.key.endsWith('image.webp')
+          /image\.(webp|jpe?g)$/.test(payload.object.key)
         ) {
           await processR2Event(payload, env);
           message.ack();
